@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/* Base styles */
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+}
+
+/* Form styles */
+input[type="text"],
+input[type="email"],
+input[type="password"] {
+  @apply w-full px-4 py-2 border border-gray-300 rounded-lg
+         focus:ring-2 focus:ring-blue-500 focus:border-transparent
+         transition-colors duration-200;
+}
+
+input:disabled {
+  @apply bg-gray-100 cursor-not-allowed;
+}
+
+/* Button styles */
+.btn {
+  @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200
+         focus:outline-none focus:ring-2 focus:ring-offset-2;
+}
+
+.btn-primary {
+  @apply bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500;
+}
+
+.btn-secondary {
+  @apply bg-gray-200 text-gray-800 hover:bg-gray-300 focus:ring-gray-500;
+}
+
+.btn-danger {
+  @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+}
+
+.btn:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+/* Link styles */
+.link {
+  @apply text-blue-600 hover:text-blue-800 hover:underline transition-colors duration-200;
+}
+
+/* Card styles */
+.card {
+  @apply bg-white rounded-xl shadow-md p-6;
+}
+
+/* Error styles */
+.error-text {
+  @apply text-red-600 text-sm mt-1;
+}
+
+/* Loading spinner animation */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
