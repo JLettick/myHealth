@@ -249,6 +249,222 @@ Delete current user's account permanently.
 
 ---
 
+### Whoop Integration
+
+#### GET /whoop/connect
+Get OAuth authorization URL to connect Whoop account.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Response**: `200 OK`
+```json
+{
+  "authorization_url": "https://api.prod.whoop.com/oauth/oauth2/auth?...",
+  "state": "random_state_string"
+}
+```
+
+---
+
+#### GET /whoop/callback
+OAuth callback handler. Redirects to dashboard after processing.
+
+**Query Parameters**:
+- `code`: Authorization code from Whoop
+- `state`: State parameter for CSRF verification
+
+**Response**: `302 Redirect` to `/dashboard?whoop_connected=true` or `/dashboard?whoop_error=...`
+
+---
+
+#### DELETE /whoop/disconnect
+Disconnect Whoop account. Historical data is retained.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Response**: `200 OK`
+```json
+{
+  "success": true,
+  "message": "Whoop account disconnected successfully"
+}
+```
+
+---
+
+#### GET /whoop/status
+Get Whoop connection status.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Response**: `200 OK`
+```json
+{
+  "is_connected": true,
+  "whoop_user_id": "12345",
+  "connected_at": "2024-01-15T10:00:00Z",
+  "last_sync_at": "2024-01-16T08:00:00Z",
+  "scopes": ["read:profile", "read:cycles", "read:recovery", "read:sleep", "read:workout"]
+}
+```
+
+---
+
+#### POST /whoop/sync
+Trigger synchronization of Whoop data.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Query Parameters** (optional):
+- `start_date`: ISO 8601 datetime (default: 30 days ago)
+- `end_date`: ISO 8601 datetime (default: now)
+
+**Response**: `200 OK`
+```json
+{
+  "success": true,
+  "cycles_synced": 30,
+  "recovery_synced": 30,
+  "sleep_synced": 35,
+  "workouts_synced": 12,
+  "sync_completed_at": "2024-01-16T10:05:00Z"
+}
+```
+
+---
+
+#### GET /whoop/dashboard
+Get summary metrics for dashboard display.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Response**: `200 OK`
+```json
+{
+  "is_connected": true,
+  "last_sync_at": "2024-01-16T08:00:00Z",
+  "latest_recovery_score": 78.5,
+  "latest_strain_score": 12.4,
+  "latest_hrv": 45.2,
+  "latest_resting_hr": 52.0,
+  "latest_sleep_score": 82.0,
+  "latest_sleep_hours": 7.5,
+  "avg_recovery_7d": 72.3,
+  "avg_strain_7d": 11.8,
+  "avg_sleep_hours_7d": 7.2,
+  "total_workouts_7d": 5
+}
+```
+
+---
+
+#### GET /whoop/sleep
+Get paginated sleep records.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Query Parameters**:
+- `page`: Page number (default: 1)
+- `page_size`: Records per page, max 50 (default: 10)
+- `include_naps`: Include nap records (default: false)
+
+**Response**: `200 OK`
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "whoop_sleep_id": 12345,
+      "start_time": "2024-01-15T23:00:00Z",
+      "end_time": "2024-01-16T07:00:00Z",
+      "is_nap": false,
+      "sleep_score": 82.0,
+      "total_in_bed_milli": 28800000,
+      "total_awake_milli": 1800000,
+      "total_light_sleep_milli": 10800000,
+      "total_slow_wave_sleep_milli": 7200000,
+      "total_rem_sleep_milli": 9000000,
+      "sleep_efficiency": 0.94,
+      "respiratory_rate": 14.5,
+      "created_at": "2024-01-16T08:00:00Z"
+    }
+  ],
+  "total": 30,
+  "page": 1,
+  "page_size": 10
+}
+```
+
+---
+
+#### GET /whoop/workouts
+Get paginated workout records.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Query Parameters**:
+- `page`: Page number (default: 1)
+- `page_size`: Records per page, max 50 (default: 10)
+
+**Response**: `200 OK`
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "whoop_workout_id": 67890,
+      "start_time": "2024-01-16T06:00:00Z",
+      "end_time": "2024-01-16T07:00:00Z",
+      "sport_id": 1,
+      "sport_name": "Running",
+      "strain_score": 14.2,
+      "kilojoules": 2500.0,
+      "average_heart_rate": 145,
+      "max_heart_rate": 175,
+      "distance_meter": 8000.0,
+      "created_at": "2024-01-16T08:00:00Z"
+    }
+  ],
+  "total": 12,
+  "page": 1,
+  "page_size": 10
+}
+```
+
+---
+
+#### GET /whoop/recovery
+Get paginated recovery records.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Query Parameters**:
+- `page`: Page number (default: 1)
+- `page_size`: Records per page, max 50 (default: 10)
+
+**Response**: `200 OK`
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "whoop_cycle_id": 11111,
+      "recovery_score": 78.5,
+      "resting_heart_rate": 52.0,
+      "hrv_rmssd_milli": 45.2,
+      "spo2_percentage": 97.5,
+      "skin_temp_celsius": 33.2,
+      "created_at": "2024-01-16T08:00:00Z"
+    }
+  ],
+  "total": 30,
+  "page": 1,
+  "page_size": 10
+}
+```
+
+---
+
 ## Error Responses
 
 All errors follow this format:
@@ -273,6 +489,11 @@ All errors follow this format:
 | `RATE_LIMIT_EXCEEDED` | 429 | Too many requests |
 | `EXTERNAL_SERVICE_ERROR` | 502 | External service failed |
 | `INTERNAL_ERROR` | 500 | Unexpected server error |
+| `WHOOP_AUTH_ERROR` | 401 | Whoop authentication failed |
+| `WHOOP_NOT_CONNECTED` | 404 | Whoop account not connected |
+| `WHOOP_TOKEN_EXPIRED` | 401 | Whoop tokens expired, reconnect required |
+| `WHOOP_RATE_LIMIT` | 429 | Whoop API rate limit exceeded |
+| `WHOOP_SYNC_ERROR` | 502 | Failed to sync Whoop data |
 
 ---
 

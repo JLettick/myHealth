@@ -99,6 +99,53 @@ CREATE TRIGGER update_profiles_updated_at
     FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 ```
 
+### Run Whoop Tables Migration
+
+If you want to integrate with Whoop, run this SQL to create the necessary tables:
+
+```sql
+-- See backend/migrations/002_whoop_tables.sql for the full migration
+-- This creates:
+--   - whoop_connections: OAuth token storage
+--   - whoop_cycles: Daily physiological data
+--   - whoop_recovery: Recovery scores
+--   - whoop_sleep: Sleep sessions
+--   - whoop_workouts: Workout activities
+-- Plus RLS policies for all tables
+```
+
+Run the migration file: `backend/migrations/002_whoop_tables.sql`
+
+## 1.5. Whoop Developer Setup (Optional)
+
+To connect your Whoop account and pull fitness data:
+
+### Register Your App
+
+1. Go to [developer.whoop.com](https://developer.whoop.com)
+2. Create a new application
+3. Set the redirect URI to: `http://localhost:8000/api/v1/whoop/callback`
+4. Note your Client ID and Client Secret
+
+### Generate Encryption Key
+
+Whoop OAuth tokens are encrypted at rest. Generate a Fernet encryption key:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+### Add to Environment
+
+Add these variables to your `backend/.env`:
+
+```env
+WHOOP_CLIENT_ID=your-client-id
+WHOOP_CLIENT_SECRET=your-client-secret
+WHOOP_REDIRECT_URI=http://localhost:8000/api/v1/whoop/callback
+ENCRYPTION_KEY=your-fernet-key-from-above
+```
+
 ## 2. Development Setup
 
 ### Backend

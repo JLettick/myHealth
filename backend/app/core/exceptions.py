@@ -164,6 +164,113 @@ class ExternalServiceError(AppException):
         )
 
 
+# =============================================================================
+# Whoop Integration Exceptions
+# =============================================================================
+
+
+class WhoopError(AppException):
+    """Base exception for Whoop-related errors."""
+
+    def __init__(
+        self,
+        message: str = "Whoop error",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+        error_code: str = "WHOOP_ERROR",
+        details: Optional[dict[str, Any]] = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=status_code,
+            error_code=error_code,
+            details=details,
+        )
+
+
+class WhoopAuthError(WhoopError):
+    """Raised when Whoop OAuth authentication fails."""
+
+    def __init__(
+        self,
+        message: str = "Whoop authentication failed",
+        details: Optional[dict[str, Any]] = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            error_code="WHOOP_AUTH_ERROR",
+            details=details,
+        )
+
+
+class WhoopNotConnectedError(WhoopError):
+    """Raised when user hasn't connected their Whoop account."""
+
+    def __init__(
+        self,
+        message: str = "Whoop account not connected",
+        details: Optional[dict[str, Any]] = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="WHOOP_NOT_CONNECTED",
+            details=details,
+        )
+
+
+class WhoopTokenExpiredError(WhoopError):
+    """Raised when Whoop tokens have expired and refresh failed."""
+
+    def __init__(
+        self,
+        message: str = "Whoop tokens expired - please reconnect",
+        details: Optional[dict[str, Any]] = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            error_code="WHOOP_TOKEN_EXPIRED",
+            details=details,
+        )
+
+
+class WhoopRateLimitError(WhoopError):
+    """Raised when Whoop API rate limit is exceeded."""
+
+    def __init__(
+        self,
+        message: str = "Whoop API rate limit exceeded",
+        retry_after: Optional[int] = None,
+    ):
+        details = {}
+        if retry_after:
+            details["retry_after_seconds"] = retry_after
+
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            error_code="WHOOP_RATE_LIMIT",
+            details=details,
+        )
+
+
+class WhoopSyncError(WhoopError):
+    """Raised when syncing data from Whoop fails."""
+
+    def __init__(
+        self,
+        message: str = "Failed to sync Whoop data",
+        details: Optional[dict[str, Any]] = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            error_code="WHOOP_SYNC_ERROR",
+            details=details,
+        )
+
+
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     """
     Handle AppException and return consistent JSON response.

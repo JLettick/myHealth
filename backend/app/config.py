@@ -53,6 +53,29 @@ class Settings(BaseSettings):
     # Rate Limiting
     rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
 
+    # Whoop OAuth Configuration
+    whoop_client_id: str = Field(default="", description="Whoop OAuth client ID")
+    whoop_client_secret: str = Field(default="", description="Whoop OAuth client secret")
+    whoop_redirect_uri: str = Field(
+        default="http://localhost:8000/api/v1/whoop/callback",
+        description="Whoop OAuth redirect URI"
+    )
+    whoop_api_base_url: str = Field(
+        default="https://api.prod.whoop.com/developer",
+        description="Whoop API base URL"
+    )
+    whoop_auth_url: str = Field(
+        default="https://api.prod.whoop.com/oauth/oauth2/auth",
+        description="Whoop OAuth authorization URL"
+    )
+    whoop_token_url: str = Field(
+        default="https://api.prod.whoop.com/oauth/oauth2/token",
+        description="Whoop OAuth token URL"
+    )
+
+    # Token Encryption
+    encryption_key: str = Field(default="", description="Fernet encryption key for token storage")
+
     @property
     def is_production(self) -> bool:
         """Check if running in production environment."""

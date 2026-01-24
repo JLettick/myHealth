@@ -1,6 +1,6 @@
 # myHealth
 
-A full-stack health tracking web application with user authentication.
+A full-stack health tracking web application that aggregates fitness data from multiple sources into one centralized dashboard.
 
 ## Tech Stack
 
@@ -11,6 +11,7 @@ A full-stack health tracking web application with user authentication.
 
 ## Features
 
+### Core Features
 - User registration and authentication
 - Secure session management with JWT tokens
 - Token refresh for seamless user experience
@@ -19,6 +20,17 @@ A full-stack health tracking web application with user authentication.
 - Structured logging for debugging
 - Docker containerization for easy deployment
 
+### Data Sources
+
+#### Whoop Integration
+Connect your Whoop account to sync:
+- **Recovery**: Daily recovery score, HRV, resting heart rate, SpO2
+- **Strain**: Day strain, calories burned, heart rate data
+- **Sleep**: Sleep duration, sleep stages, sleep quality score
+- **Workouts**: Activity type, strain, heart rate zones, duration
+
+The dashboard displays your latest metrics and 7-day trends.
+
 ## Project Structure
 
 ```
@@ -26,21 +38,35 @@ myHealth/
 ├── backend/                 # FastAPI backend
 │   ├── app/
 │   │   ├── api/v1/         # API endpoints
-│   │   ├── core/           # Security, logging, exceptions
-│   │   ├── schemas/        # Pydantic models
+│   │   │   └── endpoints/
+│   │   │       ├── auth.py
+│   │   │       ├── users.py
+│   │   │       ├── health.py
+│   │   │       └── whoop.py    # Whoop integration
+│   │   ├── core/           # Security, logging, exceptions, encryption
+│   │   ├── schemas/        # Pydantic models (auth, user, whoop)
 │   │   ├── services/       # Business logic
+│   │   │   ├── auth_service.py
+│   │   │   ├── whoop_client.py     # Whoop API client
+│   │   │   ├── whoop_service.py    # OAuth management
+│   │   │   └── whoop_sync_service.py
 │   │   ├── middleware/     # CORS, logging middleware
 │   │   ├── config.py       # Configuration
 │   │   ├── dependencies.py # Auth dependencies
 │   │   └── main.py         # Application entry
+│   ├── migrations/         # SQL migrations
 │   ├── Dockerfile
 │   └── requirements.txt
 │
 ├── frontend/               # React frontend
 │   ├── src/
-│   │   ├── api/           # API client
-│   │   ├── components/    # React components
-│   │   ├── contexts/      # Auth context
+│   │   ├── api/           # API client (auth, whoop)
+│   │   ├── components/
+│   │   │   ├── common/    # Button, Input, etc.
+│   │   │   ├── auth/      # LoginForm, ProtectedRoute
+│   │   │   ├── layout/    # Header, Footer, Layout
+│   │   │   └── whoop/     # Whoop dashboard components
+│   │   ├── contexts/      # Auth & Whoop contexts
 │   │   ├── pages/         # Page components
 │   │   ├── types/         # TypeScript types
 │   │   └── utils/         # Utilities
@@ -94,6 +120,8 @@ See [API.md](./API.md) for detailed API documentation.
 - Row Level Security (RLS) in Supabase
 - Input validation with Pydantic
 - Non-root Docker containers
+- OAuth tokens encrypted at rest (Fernet symmetric encryption)
+- CSRF protection for OAuth flows via state parameter
 
 ## License
 
