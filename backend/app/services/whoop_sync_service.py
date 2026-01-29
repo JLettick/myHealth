@@ -316,17 +316,7 @@ class WhoopSyncService:
                 "total_workouts_7d": 0,
             }
 
-        # Get latest recovery
-        latest_recovery = (
-            self.supabase.admin_client.table("whoop_recovery")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-
-        # Get latest cycle for strain
+        # Get latest cycle for strain (and to find matching recovery)
         latest_cycle = (
             self.supabase.admin_client.table("whoop_cycles")
             .select("*")
@@ -335,6 +325,23 @@ class WhoopSyncService:
             .limit(1)
             .execute()
         )
+
+        # Get recovery for the latest cycle (not by created_at, which can be stale)
+        # Recovery is tied to a cycle, so we fetch the recovery for the most recent cycle
+        latest_recovery_data: dict[str, Any] = {}
+        if latest_cycle.data:
+            latest_cycle_id = latest_cycle.data[0].get("whoop_cycle_id")
+            if latest_cycle_id:
+                latest_recovery = (
+                    self.supabase.admin_client.table("whoop_recovery")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("whoop_cycle_id", latest_cycle_id)
+                    .limit(1)
+                    .execute()
+                )
+                if latest_recovery.data:
+                    latest_recovery_data = latest_recovery.data[0]
 
         # Get latest sleep
         latest_sleep = (
@@ -350,21 +357,27 @@ class WhoopSyncService:
         # Get 7-day data for averages
         seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
 
-        recovery_7d = (
-            self.supabase.admin_client.table("whoop_recovery")
-            .select("recovery_score")
-            .eq("user_id", user_id)
-            .gte("created_at", seven_days_ago)
-            .execute()
-        )
-
+        # Get cycles from last 7 days (includes cycle IDs for recovery lookup)
         cycles_7d = (
             self.supabase.admin_client.table("whoop_cycles")
-            .select("strain_score")
+            .select("whoop_cycle_id, strain_score")
             .eq("user_id", user_id)
             .gte("start_time", seven_days_ago)
             .execute()
         )
+
+        # Get recovery records for cycles in the last 7 days (not by created_at)
+        cycle_ids_7d = [c.get("whoop_cycle_id") for c in cycles_7d.data if c.get("whoop_cycle_id")]
+        recovery_7d_data = []
+        if cycle_ids_7d:
+            recovery_7d = (
+                self.supabase.admin_client.table("whoop_recovery")
+                .select("recovery_score")
+                .eq("user_id", user_id)
+                .in_("whoop_cycle_id", cycle_ids_7d)
+                .execute()
+            )
+            recovery_7d_data = recovery_7d.data
 
         sleep_7d = (
             self.supabase.admin_client.table("whoop_sleep")
@@ -384,7 +397,6 @@ class WhoopSyncService:
         )
 
         # Parse latest values
-        recovery_data = latest_recovery.data[0] if latest_recovery.data else {}
         cycle_data = latest_cycle.data[0] if latest_cycle.data else {}
         sleep_data = latest_sleep.data[0] if latest_sleep.data else {}
 
@@ -396,7 +408,7 @@ class WhoopSyncService:
 
         # Calculate 7-day averages
         avg_recovery = self._calculate_average(
-            [r.get("recovery_score") for r in recovery_7d.data]
+            [r.get("recovery_score") for r in recovery_7d_data]
         )
         avg_strain = self._calculate_average(
             [c.get("strain_score") for c in cycles_7d.data]
@@ -413,10 +425,10 @@ class WhoopSyncService:
         return {
             "is_connected": True,
             "last_sync_at": connection.get("last_sync_at"),
-            "latest_recovery_score": recovery_data.get("recovery_score"),
+            "latest_recovery_score": latest_recovery_data.get("recovery_score"),
             "latest_strain_score": cycle_data.get("strain_score"),
-            "latest_hrv": recovery_data.get("hrv_rmssd_milli"),
-            "latest_resting_hr": recovery_data.get("resting_heart_rate"),
+            "latest_hrv": latest_recovery_data.get("hrv_rmssd_milli"),
+            "latest_resting_hr": latest_recovery_data.get("resting_heart_rate"),
             "latest_sleep_score": sleep_data.get("sleep_score"),
             "latest_sleep_hours": latest_sleep_hours,
             "avg_recovery_7d": avg_recovery,
@@ -486,7 +498,13 @@ class WhoopSyncService:
         page: int = 1,
         page_size: int = 10,
     ) -> tuple[list[dict], int]:
-        """Get paginated recovery records."""
+        """
+        Get paginated recovery records.
+
+        Note: Currently orders by created_at (database insertion time).
+        For proper chronological ordering, would need to join with cycles
+        or add cycle_start_time column to recovery table.
+        """
         offset = (page - 1) * page_size
 
         response = (
