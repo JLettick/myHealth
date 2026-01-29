@@ -237,3 +237,9 @@ Thumbs.db
 .env.*.local
 backend/.env
 frontend/.env
+
+# Data seeding scripts and files (isolated from codebase)
+backend/scripts/seed_*.py
+backend/data/
+*.seed.sql
+*.seed.json

@@ -31,6 +31,19 @@ Connect your Whoop account to sync:
 
 The dashboard displays your latest metrics and 7-day trends.
 
+#### Nutrition Tracking
+Log your meals and track daily nutrition:
+- **Food Database**: Search USDA FoodData Central (150,000+ foods) or create custom foods
+- **Meal Logging**: Log food entries by meal type (breakfast, lunch, dinner, snack)
+- **Amount Tracking**: Enter amounts in grams or servings
+- **Daily Summary**: View total calories, protein, carbs, fat, and fiber
+- **Weekly Summary**: See 7-day averages and trends
+- **Goals**: Set personal macro targets and track progress
+
+The USDA integration supports:
+- **Basic Foods** (Foundation, SR Legacy): Generic foods like "chicken breast"
+- **Branded Products**: Commercial products with brand names
+
 ## Project Structure
 
 ```
@@ -42,14 +55,17 @@ myHealth/
 │   │   │       ├── auth.py
 │   │   │       ├── users.py
 │   │   │       ├── health.py
-│   │   │       └── whoop.py    # Whoop integration
+│   │   │       ├── whoop.py        # Whoop integration
+│   │   │       └── nutrition.py    # Nutrition tracking
 │   │   ├── core/           # Security, logging, exceptions, encryption
-│   │   ├── schemas/        # Pydantic models (auth, user, whoop)
+│   │   ├── schemas/        # Pydantic models (auth, user, whoop, nutrition)
 │   │   ├── services/       # Business logic
 │   │   │   ├── auth_service.py
 │   │   │   ├── whoop_client.py     # Whoop API client
 │   │   │   ├── whoop_service.py    # OAuth management
-│   │   │   └── whoop_sync_service.py
+│   │   │   ├── whoop_sync_service.py
+│   │   │   ├── nutrition_service.py  # Nutrition CRUD
+│   │   │   └── usda_service.py       # USDA food database API
 │   │   ├── middleware/     # CORS, logging middleware
 │   │   ├── config.py       # Configuration
 │   │   ├── dependencies.py # Auth dependencies
@@ -60,14 +76,15 @@ myHealth/
 │
 ├── frontend/               # React frontend
 │   ├── src/
-│   │   ├── api/           # API client (auth, whoop)
+│   │   ├── api/           # API client (auth, whoop, nutrition)
 │   │   ├── components/
 │   │   │   ├── common/    # Button, Input, etc.
 │   │   │   ├── auth/      # LoginForm, ProtectedRoute
 │   │   │   ├── layout/    # Header, Footer, Layout
-│   │   │   └── whoop/     # Whoop dashboard components
-│   │   ├── contexts/      # Auth & Whoop contexts
-│   │   ├── pages/         # Page components
+│   │   │   ├── whoop/     # Whoop dashboard components
+│   │   │   └── nutrition/ # Nutrition tracking components
+│   │   ├── contexts/      # Auth, Whoop, & Nutrition contexts
+│   │   ├── pages/         # Page components (incl. NutritionPage)
 │   │   ├── types/         # TypeScript types
 │   │   └── utils/         # Utilities
 │   ├── Dockerfile

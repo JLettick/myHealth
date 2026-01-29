@@ -116,6 +116,21 @@ If you want to integrate with Whoop, run this SQL to create the necessary tables
 
 Run the migration file: `backend/migrations/002_whoop_tables.sql`
 
+### Run Nutrition Tables Migration
+
+For the nutrition/macro tracking feature, run this SQL:
+
+```sql
+-- See backend/migrations/003_nutrition_tables.sql for the full migration
+-- This creates:
+--   - foods: Food items with nutritional info (global + user custom)
+--   - food_entries: User's meal log entries
+--   - nutrition_goals: User's daily macro targets
+-- Plus RLS policies for all tables
+```
+
+Run the migration file: `backend/migrations/003_nutrition_tables.sql`
+
 ## 1.5. Whoop Developer Setup (Optional)
 
 To connect your Whoop account and pull fitness data:
@@ -145,6 +160,31 @@ WHOOP_CLIENT_SECRET=your-client-secret
 WHOOP_REDIRECT_URI=http://localhost:8000/api/v1/whoop/callback
 ENCRYPTION_KEY=your-fernet-key-from-above
 ```
+
+## 1.6. USDA Food Database Setup (Optional)
+
+To enable searching the USDA FoodData Central database for foods:
+
+### Get API Key
+
+1. Go to [fdc.nal.usda.gov/api-key-signup.html](https://fdc.nal.usda.gov/api-key-signup.html)
+2. Fill out the form to request a free API key
+3. You'll receive the key via email
+
+### Add to Environment
+
+Add this variable to your `backend/.env`:
+
+```env
+USDA_API_KEY=your-usda-api-key
+```
+
+The USDA integration provides:
+- Search across Foundation, SR Legacy (basic foods) and Branded products
+- Automatic import of USDA foods into your personal database
+- Nutritional data including calories, protein, carbs, fat, and fiber
+
+---
 
 ## 2. Development Setup
 

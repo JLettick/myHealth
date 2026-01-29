@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # Token Encryption
     encryption_key: str = Field(default="", description="Fernet encryption key for token storage")
 
+    # USDA FoodData Central API
+    usda_api_key: str = Field(default="", description="USDA FoodData Central API key")
+    usda_api_base_url: str = Field(
+        default="https://api.nal.usda.gov/fdc/v1",
+        description="USDA FoodData Central API base URL"
+    )
+
     @property
     def is_production(self) -> bool:
         """Check if running in production environment."""

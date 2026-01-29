@@ -37,6 +37,12 @@ export function Header(): JSX.Element {
                 >
                   Dashboard
                 </Link>
+                <Link
+                  to="/nutrition"
+                  className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  Nutrition
+                </Link>
                 <div className="flex items-center space-x-3">
                   <span className="text-sm text-gray-600">
                     {user?.full_name || user?.email}

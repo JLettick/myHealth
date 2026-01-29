@@ -5,12 +5,14 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { WhoopProvider } from './contexts/WhoopContext';
+import { NutritionProvider } from './contexts/NutritionContext';
 import { Layout } from './components/layout/Layout';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { NutritionPage } from './pages/NutritionPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
 /**
@@ -21,7 +23,8 @@ function App(): JSX.Element {
     <BrowserRouter>
       <AuthProvider>
         <WhoopProvider>
-          <Layout>
+          <NutritionProvider>
+            <Layout>
             <Routes>
               {/* Public routes */}
               <Route path="/" element={<HomePage />} />
@@ -37,11 +40,20 @@ function App(): JSX.Element {
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/nutrition"
+                element={
+                  <ProtectedRoute>
+                    <NutritionPage />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* 404 catch-all */}
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Layout>
+          </NutritionProvider>
         </WhoopProvider>
       </AuthProvider>
     </BrowserRouter>

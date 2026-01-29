@@ -465,6 +465,235 @@ Get paginated recovery records.
 
 ---
 
+### Nutrition Tracking
+
+#### POST /nutrition/foods
+Create a custom food item.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Request Body**:
+```json
+{
+  "name": "Chicken Breast",
+  "brand": "Organic Farms",
+  "serving_size": 100,
+  "serving_unit": "g",
+  "calories": 165,
+  "protein_g": 31,
+  "carbs_g": 0,
+  "fat_g": 3.6,
+  "fiber_g": 0
+}
+```
+
+**Response**: `201 Created`
+
+---
+
+#### GET /nutrition/foods/search
+Search for foods by name.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Query Parameters**:
+- `q`: Search query (min 2 chars)
+- `page`: Page number (default: 1)
+- `page_size`: Results per page (default: 20)
+
+**Response**: `200 OK`
+```json
+{
+  "results": [{ "id": "uuid", "name": "Chicken Breast", ... }],
+  "total": 15,
+  "query": "chicken"
+}
+```
+
+---
+
+#### POST /nutrition/entries
+Log a food entry (meal).
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Request Body**:
+```json
+{
+  "food_id": "uuid",
+  "entry_date": "2024-01-16",
+  "meal_type": "lunch",
+  "servings": 1.5,
+  "notes": "optional notes"
+}
+```
+
+**Response**: `201 Created`
+
+---
+
+#### GET /nutrition/summary/daily
+Get daily nutrition summary.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Query Parameters**:
+- `summary_date`: Date in YYYY-MM-DD format (defaults to today)
+
+**Response**: `200 OK`
+```json
+{
+  "date": "2024-01-16",
+  "meals": [
+    {
+      "meal_type": "breakfast",
+      "entries": [...],
+      "total_calories": 450,
+      "total_protein_g": 25,
+      "total_carbs_g": 45,
+      "total_fat_g": 18
+    }
+  ],
+  "total_calories": 1850,
+  "total_protein_g": 120,
+  "total_carbs_g": 180,
+  "total_fat_g": 65,
+  "calories_target": 2000,
+  "protein_g_target": 150
+}
+```
+
+---
+
+#### GET /nutrition/goals
+Get nutrition goals.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Response**: `200 OK`
+```json
+{
+  "id": "uuid",
+  "user_id": "uuid",
+  "calories_target": 2000,
+  "protein_g_target": 150,
+  "carbs_g_target": 200,
+  "fat_g_target": 65,
+  "fiber_g_target": 25,
+  "is_active": true,
+  "created_at": "2024-01-16T10:00:00Z",
+  "updated_at": "2024-01-16T10:00:00Z"
+}
+```
+
+**Note**: Returns `null` if no goals are set (not 404).
+
+---
+
+#### PUT /nutrition/goals
+Set nutrition goals.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Request Body**:
+```json
+{
+  "calories_target": 2000,
+  "protein_g_target": 150,
+  "carbs_g_target": 200,
+  "fat_g_target": 65
+}
+```
+
+**Response**: `200 OK`
+
+---
+
+### USDA Food Database
+
+#### GET /nutrition/foods/usda/search
+Search the USDA FoodData Central database.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Query Parameters**:
+- `q`: Search query (min 2 chars)
+- `page`: Page number (default: 1)
+- `page_size`: Results per page (default: 20, max: 50)
+- `data_type`: Comma-separated data types (default: "Foundation,SR Legacy")
+  - Options: `Foundation`, `SR Legacy`, `Branded`, `Survey (FNDDS)`
+  - Example: `Foundation,SR Legacy` for basic foods, `Branded` for branded products
+
+**Response**: `200 OK`
+```json
+{
+  "results": [
+    {
+      "fdc_id": "748967",
+      "name": "Chicken, breast, meat only, cooked, roasted",
+      "brand": null,
+      "data_type": "SR Legacy",
+      "serving_size": 100,
+      "serving_unit": "g",
+      "calories": 165,
+      "protein_g": 31,
+      "carbs_g": 0,
+      "fat_g": 3.6,
+      "fiber_g": 0
+    }
+  ],
+  "total": 150,
+  "query": "chicken breast",
+  "page": 1,
+  "page_size": 20
+}
+```
+
+---
+
+#### POST /nutrition/foods/usda/import
+Import a USDA food into user's food database.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Request Body** (full USDAFoodItem from search results):
+```json
+{
+  "fdc_id": "748967",
+  "name": "Chicken, breast, meat only, cooked, roasted",
+  "brand": null,
+  "data_type": "SR Legacy",
+  "serving_size": 100,
+  "serving_unit": "g",
+  "calories": 165,
+  "protein_g": 31,
+  "carbs_g": 0,
+  "fat_g": 3.6,
+  "fiber_g": 0
+}
+```
+
+**Response**: `201 Created`
+```json
+{
+  "id": "uuid",
+  "user_id": "uuid",
+  "name": "Chicken, breast, meat only, cooked, roasted",
+  "brand": null,
+  "serving_size": 100,
+  "serving_unit": "g",
+  "calories": 165,
+  "protein_g": 31,
+  "carbs_g": 0,
+  "fat_g": 3.6,
+  "fiber_g": 0,
+  "is_verified": true,
+  "created_at": "2024-01-16T10:00:00Z"
+}
+```
+
+---
+
 ## Error Responses
 
 All errors follow this format:
