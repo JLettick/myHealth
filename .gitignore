@@ -243,3 +243,7 @@ backend/scripts/seed_*.py
 backend/data/
 *.seed.sql
 *.seed.json
+
+# Project context files (local development notes)
+GARMIN_FEATURE.md
+PROJECT_CONTEXT.md

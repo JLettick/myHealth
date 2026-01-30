@@ -11,7 +11,9 @@ This document provides context for AI agents working on this project. Read this 
 A full-stack health tracking application with:
 - **User Authentication** - Email/password via Supabase Auth
 - **Whoop Integration** - OAuth connection to sync fitness data (strain, recovery, sleep, workouts)
+- **Garmin Integration** - OAuth connection to sync fitness data (activities, sleep, heart rate, daily stats)
 - **Nutrition Tracker** - Log meals, track macros, view daily/weekly summaries
+- **Multi-Source Dashboard** - Dropdown selector to switch between Whoop and Garmin views
 
 ## Tech Stack
 
@@ -30,7 +32,7 @@ A full-stack health tracking application with:
 myHealth/myHealth/
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/endpoints/   # Route handlers (auth, users, whoop, nutrition)
+│   │   ├── api/v1/endpoints/   # Route handlers (auth, users, whoop, garmin, nutrition)
 │   │   ├── schemas/            # Pydantic request/response models
 │   │   ├── services/           # Business logic layer
 │   │   ├── core/               # Logging, exceptions, encryption
@@ -42,8 +44,8 @@ myHealth/myHealth/
 ├── frontend/
 │   ├── src/
 │   │   ├── api/                # Axios API client functions
-│   │   ├── components/         # React components (common, layout, auth, whoop, nutrition)
-│   │   ├── contexts/           # React contexts (AuthContext, WhoopContext, NutritionContext)
+│   │   ├── components/         # React components (common, layout, auth, whoop, garmin, fitness, nutrition)
+│   │   ├── contexts/           # React contexts (AuthContext, WhoopContext, GarminContext, NutritionContext)
 │   │   ├── pages/              # Page components (Home, Login, Signup, Dashboard, Nutrition)
 │   │   ├── types/              # TypeScript type definitions
 │   │   └── utils/              # Utilities (logger, storage)
@@ -65,6 +67,10 @@ These files demonstrate the established patterns. Read these before implementing
 | `frontend/src/contexts/WhoopContext.tsx` | React context pattern, state management |
 | `frontend/src/api/whoop.ts` | Frontend API client pattern |
 | `backend/migrations/002_whoop_tables.sql` | Database migration pattern, RLS policies |
+| `backend/app/api/v1/endpoints/garmin.py` | Garmin endpoint structure, OAuth flow |
+| `backend/app/services/garmin_service.py` | Garmin service layer pattern |
+| `frontend/src/contexts/GarminContext.tsx` | Garmin React context pattern |
+| `backend/migrations/003_garmin_tables.sql` | Garmin database tables |
 
 ---
 
@@ -94,6 +100,11 @@ All tables use UUID primary keys and have RLS (Row Level Security) enabled.
 | `whoop_recovery` | Recovery scores | user_id, recovery_score, hrv_rmssd_milli |
 | `whoop_sleep` | Sleep sessions | user_id, sleep_score, total_rem_sleep_milli |
 | `whoop_workouts` | Workout activities | user_id, sport_name, strain_score |
+| `garmin_connections` | Garmin OAuth tokens (encrypted) | user_id, access_token_encrypted, token_expires_at |
+| `garmin_activities` | Garmin workouts | user_id, garmin_activity_id, activity_type, duration_seconds |
+| `garmin_sleep` | Garmin sleep sessions | user_id, total_sleep_seconds, sleep_score |
+| `garmin_heart_rate` | Daily heart rate metrics | user_id, date, resting_hr, hrv_value |
+| `garmin_daily_stats` | Daily aggregate stats | user_id, date, total_steps, calories_burned |
 | `foods` | Food items (global + user custom) | user_id (NULL=global), name, calories, protein_g |
 | `food_entries` | User's meal log | user_id, food_id, entry_date, meal_type |
 | `nutrition_goals` | Daily macro targets | user_id, calories_target, protein_g_target |
@@ -107,6 +118,7 @@ All tables use UUID primary keys and have RLS (Row Level Security) enabled.
 | `/api/v1/auth/*` | Authentication (signup, login, logout, refresh, me) |
 | `/api/v1/users/*` | User profile (get, update, delete) |
 | `/api/v1/whoop/*` | Whoop OAuth and data sync |
+| `/api/v1/garmin/*` | Garmin OAuth and data sync |
 | `/api/v1/nutrition/*` | Food logging, entries, summaries, goals |
 
 ---
@@ -117,6 +129,8 @@ All tables use UUID primary keys and have RLS (Row Level Security) enabled.
 |---------|--------|-------|
 | Authentication | ✅ Complete | Email/password, JWT refresh |
 | Whoop Integration | ✅ Complete | OAuth, syncs cycles/recovery/sleep/workouts |
+| Garmin Integration | ✅ Complete | OAuth, syncs activities/sleep/heart rate/daily stats |
+| Fitness Source Selector | ✅ Complete | Dropdown to switch between Whoop/Garmin on Dashboard |
 | Nutrition Tracker | ✅ Complete | Backend + Frontend complete |
 | USDA Integration | ✅ Complete | Search USDA foods, import to user's database |
 
@@ -169,6 +183,9 @@ SUPABASE_SERVICE_ROLE_KEY=xxx
 WHOOP_CLIENT_ID=xxx
 WHOOP_CLIENT_SECRET=xxx
 WHOOP_REDIRECT_URI=http://localhost:8000/api/v1/whoop/callback
+GARMIN_CLIENT_ID=xxx
+GARMIN_CLIENT_SECRET=xxx
+GARMIN_REDIRECT_URI=http://localhost:8000/api/v1/garmin/callback
 ENCRYPTION_KEY=xxx  # Fernet key for encrypting OAuth tokens
 USDA_API_KEY=xxx    # For USDA FoodData Central API
 ```
@@ -240,5 +257,7 @@ When making changes, verify:
 
 1. **Auth Flow**: Signup → Login → Access protected route → Logout
 2. **Whoop Flow**: Connect → Sync → View data on dashboard → Disconnect
-3. **Nutrition Flow**: Add food → Log entry → View daily summary → Set goals
-4. **API Health**: `curl http://localhost:8000/api/v1/health`
+3. **Garmin Flow**: Connect → Sync → View data on dashboard → Disconnect
+4. **Source Selector**: Switch between Whoop/Garmin on Dashboard → Verify correct data displays
+5. **Nutrition Flow**: Add food → Log entry → View daily summary → Set goals
+6. **API Health**: `curl http://localhost:8000/api/v1/health`

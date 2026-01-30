@@ -76,6 +76,32 @@ class Settings(BaseSettings):
     # Token Encryption
     encryption_key: str = Field(default="", description="Fernet encryption key for token storage")
 
+    # Garmin Connect API Configuration
+    garmin_client_id: str = Field(default="", description="Garmin OAuth client ID")
+    garmin_client_secret: str = Field(default="", description="Garmin OAuth client secret")
+    garmin_redirect_uri: str = Field(
+        default="http://localhost:8000/api/v1/garmin/callback",
+        description="Garmin OAuth redirect URI"
+    )
+    garmin_api_base_url: str = Field(
+        default="https://apis.garmin.com",
+        description="Garmin API base URL"
+    )
+    garmin_auth_url: str = Field(
+        default="https://connect.garmin.com/oauthConfirm",
+        description="Garmin OAuth authorization URL"
+    )
+    garmin_token_url: str = Field(
+        default="https://connectapi.garmin.com/oauth-service/oauth/access_token",
+        description="Garmin OAuth token URL"
+    )
+
+    # Frontend URL (for OAuth redirects)
+    frontend_url: str = Field(
+        default="http://localhost:5173",
+        description="Frontend application URL"
+    )
+
     # USDA FoodData Central API
     usda_api_key: str = Field(default="", description="USDA FoodData Central API key")
     usda_api_base_url: str = Field(
