@@ -5,6 +5,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { WhoopProvider } from './contexts/WhoopContext';
+import { GarminProvider } from './contexts/GarminContext';
 import { NutritionProvider } from './contexts/NutritionContext';
 import { Layout } from './components/layout/Layout';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
@@ -23,8 +24,9 @@ function App(): JSX.Element {
     <BrowserRouter>
       <AuthProvider>
         <WhoopProvider>
-          <NutritionProvider>
-            <Layout>
+          <GarminProvider>
+            <NutritionProvider>
+              <Layout>
             <Routes>
               {/* Public routes */}
               <Route path="/" element={<HomePage />} />
@@ -52,8 +54,9 @@ function App(): JSX.Element {
               {/* 404 catch-all */}
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
-          </Layout>
-          </NutritionProvider>
+              </Layout>
+            </NutritionProvider>
+          </GarminProvider>
         </WhoopProvider>
       </AuthProvider>
     </BrowserRouter>
