@@ -184,6 +184,79 @@ The USDA integration provides:
 - Automatic import of USDA foods into your personal database
 - Nutritional data including calories, protein, carbs, fat, and fiber
 
+## 1.7. AWS Bedrock Setup (AI Health Assistant)
+
+The AI Health Assistant uses AWS Bedrock with Claude models. Follow these steps:
+
+### Create IAM User
+
+1. Go to AWS Console → IAM → Users → Create user
+2. Name it something like `bedrock-user`
+3. Select **Attach policies directly**
+4. Create and attach this custom policy:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "aws-marketplace:ViewSubscriptions",
+                "aws-marketplace:Subscribe"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream"
+            ],
+            "Resource": [
+                "arn:aws:bedrock:*::foundation-model/*",
+                "arn:aws:bedrock:*:*:inference-profile/*"
+            ]
+        }
+    ]
+}
+```
+
+5. Create access keys: Security credentials → Create access key → Application running outside AWS
+
+### Submit Anthropic Use Case Form
+
+1. Go to AWS Console → Amazon Bedrock → Model catalog
+2. Search for "Claude" and select a model (e.g., Claude 3.5 Haiku)
+3. Click "Open in playground" or try to invoke
+4. Complete the Anthropic use case form when prompted
+5. Access is typically granted immediately after form submission
+
+### Add to Environment
+
+Add these variables to your `backend/.env`:
+
+```env
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+BEDROCK_MODEL_ID=us.anthropic.claude-3-5-haiku-20241022-v1:0
+```
+
+**Important**: Use the inference profile model ID (note the `us.` prefix) for Claude 3.5 models.
+
+### Run Agent Tables Migration
+
+Run the migration file `backend/migrations/004_agent_tables.sql` in Supabase SQL Editor:
+
+```sql
+-- See backend/migrations/004_agent_tables.sql for the full migration
+-- This creates:
+--   - agent_conversations: Chat conversations
+--   - agent_messages: Individual messages
+-- Plus RLS policies for all tables
+```
+
 ---
 
 ## 2. Development Setup
@@ -322,6 +395,12 @@ npm run lint
 - Ensure the SQL migration ran successfully
 - Check RLS policies are configured correctly
 - Verify the service role key has admin access
+
+**AI Assistant Errors**
+- `AccessDeniedException`: Check IAM policy includes both `foundation-model/*` and `inference-profile/*` resources
+- `ResourceNotFoundException` / Use case form required: Submit Anthropic use case form in Bedrock console
+- `ValidationException` about inference profiles: Use model ID with `us.` prefix (e.g., `us.anthropic.claude-3-5-haiku-20241022-v1:0`)
+- No health data in AI responses: Ensure Whoop is connected and has synced data
 
 ### Logs
 
