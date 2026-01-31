@@ -43,6 +43,12 @@ export function Header(): JSX.Element {
                 >
                   Nutrition
                 </Link>
+                <Link
+                  to="/agent"
+                  className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  AI Assistant
+                </Link>
                 <div className="flex items-center space-x-3">
                   <span className="text-sm text-gray-600">
                     {user?.full_name || user?.email}

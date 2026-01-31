@@ -694,6 +694,105 @@ Import a USDA food into user's food database.
 
 ---
 
+### AI Agent
+
+#### POST /agent/chat
+Send a message to the AI health assistant.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Request Body**:
+```json
+{
+  "content": "How is my recovery looking?",
+  "conversation_id": "uuid"  // optional, omit to start new conversation
+}
+```
+
+**Response**: `200 OK`
+```json
+{
+  "message": {
+    "id": "uuid",
+    "role": "assistant",
+    "content": "Your recovery is at 78% today...",
+    "created_at": "2024-01-16T10:00:00Z"
+  },
+  "conversation_id": "uuid"
+}
+```
+
+**Notes**:
+- AI has access to user's Whoop data (recovery, HRV, strain, sleep) and nutrition logs
+- Conversation history is persisted and can be continued by passing `conversation_id`
+- First message in a conversation sets the title automatically
+
+---
+
+#### GET /agent/conversations
+List all conversations for the current user.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Response**: `200 OK`
+```json
+[
+  {
+    "id": "uuid",
+    "title": "How is my recovery looking?",
+    "created_at": "2024-01-16T10:00:00Z",
+    "updated_at": "2024-01-16T10:05:00Z"
+  }
+]
+```
+
+---
+
+#### GET /agent/conversations/{id}
+Get a specific conversation with all messages.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Response**: `200 OK`
+```json
+{
+  "id": "uuid",
+  "title": "How is my recovery looking?",
+  "created_at": "2024-01-16T10:00:00Z",
+  "updated_at": "2024-01-16T10:05:00Z",
+  "messages": [
+    {
+      "id": "uuid",
+      "role": "user",
+      "content": "How is my recovery looking?",
+      "created_at": "2024-01-16T10:00:00Z"
+    },
+    {
+      "id": "uuid",
+      "role": "assistant",
+      "content": "Your recovery is at 78% today...",
+      "created_at": "2024-01-16T10:00:05Z"
+    }
+  ]
+}
+```
+
+---
+
+#### DELETE /agent/conversations/{id}
+Delete a conversation and all its messages.
+
+**Headers**: `Authorization: Bearer <token>` (required)
+
+**Response**: `200 OK`
+```json
+{
+  "success": true
+}
+```
+
+---
+
 ## Error Responses
 
 All errors follow this format:
@@ -723,6 +822,9 @@ All errors follow this format:
 | `WHOOP_TOKEN_EXPIRED` | 401 | Whoop tokens expired, reconnect required |
 | `WHOOP_RATE_LIMIT` | 429 | Whoop API rate limit exceeded |
 | `WHOOP_SYNC_ERROR` | 502 | Failed to sync Whoop data |
+| `BEDROCK_API_ERROR` | 500/502 | AWS Bedrock API error |
+| `BEDROCK_ACCESS_DENIED` | 403 | AWS Bedrock access denied (check IAM permissions) |
+| `BEDROCK_RATE_LIMIT` | 429 | Bedrock rate limit exceeded |
 
 ---
 

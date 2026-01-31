@@ -14,6 +14,7 @@ A full-stack health tracking application with:
 - **Garmin Integration** - OAuth connection to sync fitness data (activities, sleep, heart rate, daily stats)
 - **Nutrition Tracker** - Log meals, track macros, view daily/weekly summaries
 - **Multi-Source Dashboard** - Dropdown selector to switch between Whoop and Garmin views
+- **AI Health Assistant** - Conversational AI powered by AWS Bedrock with access to user's health data
 
 ## Tech Stack
 
@@ -23,6 +24,7 @@ A full-stack health tracking application with:
 | Frontend | React 18, Vite, TypeScript, Tailwind CSS |
 | Database | Supabase (PostgreSQL with RLS) |
 | Auth | Supabase Auth with JWT tokens |
+| AI | AWS Bedrock (Claude 3.5 via cross-region inference) |
 
 ---
 
@@ -32,9 +34,9 @@ A full-stack health tracking application with:
 myHealth/myHealth/
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/endpoints/   # Route handlers (auth, users, whoop, garmin, nutrition)
+│   │   ├── api/v1/endpoints/   # Route handlers (auth, users, whoop, garmin, nutrition, agent)
 │   │   ├── schemas/            # Pydantic request/response models
-│   │   ├── services/           # Business logic layer
+│   │   ├── services/           # Business logic layer (includes bedrock_client, agent_service)
 │   │   ├── core/               # Logging, exceptions, encryption
 │   │   ├── middleware/         # CORS, logging middleware
 │   │   ├── config.py           # Environment settings (Pydantic Settings)
@@ -44,9 +46,9 @@ myHealth/myHealth/
 ├── frontend/
 │   ├── src/
 │   │   ├── api/                # Axios API client functions
-│   │   ├── components/         # React components (common, layout, auth, whoop, garmin, fitness, nutrition)
-│   │   ├── contexts/           # React contexts (AuthContext, WhoopContext, GarminContext, NutritionContext)
-│   │   ├── pages/              # Page components (Home, Login, Signup, Dashboard, Nutrition)
+│   │   ├── components/         # React components (common, layout, auth, whoop, garmin, fitness, nutrition, agent)
+│   │   ├── contexts/           # React contexts (AuthContext, WhoopContext, GarminContext, NutritionContext, AgentContext)
+│   │   ├── pages/              # Page components (Home, Login, Signup, Dashboard, Nutrition, Agent)
 │   │   ├── types/              # TypeScript type definitions
 │   │   └── utils/              # Utilities (logger, storage)
 │   └── package.json
@@ -71,6 +73,10 @@ These files demonstrate the established patterns. Read these before implementing
 | `backend/app/services/garmin_service.py` | Garmin service layer pattern |
 | `frontend/src/contexts/GarminContext.tsx` | Garmin React context pattern |
 | `backend/migrations/003_garmin_tables.sql` | Garmin database tables |
+| `backend/app/services/bedrock_client.py` | AWS Bedrock API integration |
+| `backend/app/services/agent_service.py` | AI agent orchestration, health context building |
+| `frontend/src/contexts/AgentContext.tsx` | AI chat state management |
+| `backend/migrations/004_agent_tables.sql` | Agent conversation tables |
 
 ---
 
@@ -108,6 +114,8 @@ All tables use UUID primary keys and have RLS (Row Level Security) enabled.
 | `foods` | Food items (global + user custom) | user_id (NULL=global), name, calories, protein_g |
 | `food_entries` | User's meal log | user_id, food_id, entry_date, meal_type |
 | `nutrition_goals` | Daily macro targets | user_id, calories_target, protein_g_target |
+| `agent_conversations` | AI chat conversations | user_id, title, created_at, updated_at |
+| `agent_messages` | Chat messages | conversation_id, role, content, created_at |
 
 ---
 
@@ -120,6 +128,7 @@ All tables use UUID primary keys and have RLS (Row Level Security) enabled.
 | `/api/v1/whoop/*` | Whoop OAuth and data sync |
 | `/api/v1/garmin/*` | Garmin OAuth and data sync |
 | `/api/v1/nutrition/*` | Food logging, entries, summaries, goals |
+| `/api/v1/agent/*` | AI chat, conversations, message history |
 
 ---
 
@@ -129,10 +138,11 @@ All tables use UUID primary keys and have RLS (Row Level Security) enabled.
 |---------|--------|-------|
 | Authentication | ✅ Complete | Email/password, JWT refresh |
 | Whoop Integration | ✅ Complete | OAuth, syncs cycles/recovery/sleep/workouts |
-| Garmin Integration | ✅ Complete | OAuth, syncs activities/sleep/heart rate/daily stats |
-| Fitness Source Selector | ✅ Complete | Dropdown to switch between Whoop/Garmin on Dashboard |
+| Garmin Integration | ⏸️ Disabled | Code complete but hidden - Garmin API not publicly accessible |
+| Fitness Source Selector | ✅ Complete | Shows Whoop only (Garmin hidden until API access available) |
 | Nutrition Tracker | ✅ Complete | Backend + Frontend complete |
 | USDA Integration | ✅ Complete | Search USDA foods, import to user's database |
+| AI Health Assistant | ✅ Complete | AWS Bedrock Claude, health context, conversation persistence |
 
 ---
 
@@ -188,6 +198,12 @@ GARMIN_CLIENT_SECRET=xxx
 GARMIN_REDIRECT_URI=http://localhost:8000/api/v1/garmin/callback
 ENCRYPTION_KEY=xxx  # Fernet key for encrypting OAuth tokens
 USDA_API_KEY=xxx    # For USDA FoodData Central API
+
+# AWS Bedrock (AI Agent)
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=xxx
+AWS_SECRET_ACCESS_KEY=xxx
+BEDROCK_MODEL_ID=us.anthropic.claude-3-5-haiku-20241022-v1:0  # Use inference profile ID
 ```
 
 ### Frontend (`frontend/.env`)
@@ -251,13 +267,34 @@ backend/data/
 
 ---
 
+## AI Health Assistant (Complete)
+
+See **[AGENT_FEATURE.md](AGENT_FEATURE.md)** for the original implementation plan.
+
+**Overview:** AWS Bedrock-powered conversational AI health assistant with access to user's Whoop metrics and nutrition logs for personalized insights.
+
+**Key Files:**
+- `backend/app/services/bedrock_client.py` - AWS Bedrock API wrapper
+- `backend/app/services/agent_service.py` - Chat orchestration, health context building
+- `backend/app/api/v1/endpoints/agent.py` - REST endpoints
+- `frontend/src/contexts/AgentContext.tsx` - Chat state management
+- `frontend/src/pages/AgentPage.tsx` - Chat UI with conversation sidebar
+
+**AWS Setup Requirements:**
+1. Create IAM user with Bedrock permissions (including inference-profile resources)
+2. Submit Anthropic use case form in Bedrock console
+3. Use inference profile model ID (e.g., `us.anthropic.claude-3-5-haiku-20241022-v1:0`)
+
+---
+
 ## Testing Checklist
 
 When making changes, verify:
 
 1. **Auth Flow**: Signup → Login → Access protected route → Logout
 2. **Whoop Flow**: Connect → Sync → View data on dashboard → Disconnect
-3. **Garmin Flow**: Connect → Sync → View data on dashboard → Disconnect
-4. **Source Selector**: Switch between Whoop/Garmin on Dashboard → Verify correct data displays
+3. **Garmin Flow**: *(Currently disabled - Garmin API not publicly accessible)*
+4. **Source Selector**: Currently shows Whoop only (Garmin hidden)
 5. **Nutrition Flow**: Add food → Log entry → View daily summary → Set goals
-6. **API Health**: `curl http://localhost:8000/api/v1/health`
+6. **AI Assistant Flow**: Navigate to /agent → Send message → Verify AI response with health context → Test conversation persistence
+7. **API Health**: `curl http://localhost:8000/api/v1/health`

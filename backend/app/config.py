@@ -109,6 +109,15 @@ class Settings(BaseSettings):
         description="USDA FoodData Central API base URL"
     )
 
+    # AWS Bedrock Configuration
+    aws_region: str = Field(default="us-east-1", description="AWS region for Bedrock")
+    aws_access_key_id: str = Field(default="", description="AWS access key ID")
+    aws_secret_access_key: str = Field(default="", description="AWS secret access key")
+    bedrock_model_id: str = Field(
+        default="anthropic.claude-3-sonnet-20240229-v1:0",
+        description="AWS Bedrock model ID"
+    )
+
     @property
     def is_production(self) -> bool:
         """Check if running in production environment."""
