@@ -248,3 +248,7 @@ backend/data/
 GARMIN_FEATURE.md
 PROJECT_CONTEXT.md
 AGENT_FEATURE.md
+
+# Claude Code
+CLAUDE.md
+.claude/

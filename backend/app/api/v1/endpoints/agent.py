@@ -52,6 +52,8 @@ async def send_chat_message(
         return ChatResponse(
             message=result["message"],
             conversation_id=result["conversation_id"],
+            tool_actions=result.get("tool_actions"),
+            debug_trace=result.get("debug_trace"),
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

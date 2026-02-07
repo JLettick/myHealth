@@ -1,8 +1,8 @@
 """
-Agent service for managing AI conversations.
+Agent service for managing AI conversations with tool use.
 
-Handles conversation persistence, health context building,
-and orchestration of Bedrock API calls.
+Handles conversation persistence, agentic tool-use loop,
+and orchestration of Bedrock Converse API calls.
 """
 
 import logging
@@ -13,17 +13,62 @@ from uuid import uuid4
 from app.config import get_settings, Settings
 from app.services.supabase_client import get_supabase_service, SupabaseService
 from app.services.bedrock_client import get_bedrock_client, BedrockClient
+from app.services.agent_tools import (
+    TOOL_DEFINITIONS,
+    execute_tool,
+    get_tool_action_label,
+)
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a helpful health and fitness assistant for the myHealth app.
-You have access to the user's health data from their Whoop device, nutrition logs, and workout logs.
-Provide personalized, actionable advice based on their data.
-Be encouraging but honest. If you notice concerning patterns, suggest consulting a healthcare professional.
-Keep responses concise and focused.
-Do not make up data - only reference the health context provided below.
+MAX_TOOL_ITERATIONS = 15
 
-{health_context}"""
+SYSTEM_PROMPT = """You are a helpful health and fitness assistant for the myHealth app.
+You can read and write the user's health data using the tools provided.
+
+Today's date is {today}.
+
+## Available Tools
+
+### Reading Data
+- **get_nutrition_summary** — Get meals, macros, and goals for a date
+- **search_foods** — Search the user's food database by name
+- **search_usda_foods** — Search USDA FoodData Central for foods not in the user's DB
+- **get_workout_summary** — Get workout sessions, sets, and volume for a date
+- **search_exercises** — Search exercises by name or category
+- **get_whoop_summary** — Get Whoop recovery, sleep, HRV, and strain metrics
+
+### Writing Data
+- **log_food_entry** — Log a meal (requires food_id from search_foods or create_food)
+- **create_food** — Create a custom food with macros
+- **log_workout** — Log a workout session with sets
+- **create_exercise** — Create a custom exercise
+
+## Meal Logging Workflow
+1. Search for the food using search_foods — results have an `id` field (this is the food_id)
+2. If found, use log_food_entry with that food_id
+3. If NOT found, search search_usda_foods for nutrition data
+4. Use create_food with the name and macros from the USDA result — this returns a new food with an `id`
+5. Use log_food_entry with the new food's id as food_id
+IMPORTANT: USDA results do NOT have a food_id. You must ALWAYS create_food first before logging. Never pass a USDA numeric ID to log_food_entry.
+
+## Workout Logging Workflow
+1. Search for the exercise using search_exercises
+2. If not found, use create_exercise
+3. Use log_workout with exercise_id, set_type, and relevant data (reps/weight or duration/distance)
+
+## Unit Conversions
+- Pounds to kg: divide by 2.205
+- Miles to meters: multiply by 1609.34
+- Kilometers to meters: multiply by 1000
+
+## Guidelines
+- Be concise and encouraging
+- Use tools to fetch data on demand rather than guessing
+- When logging meals, infer the meal_type from context (time of day, user's words)
+- When the user mentions food quantities, estimate servings based on standard serving sizes
+- If you notice concerning health patterns, suggest consulting a healthcare professional
+- Confirm what you logged so the user can verify accuracy"""
 
 
 class AgentService:
@@ -39,99 +84,6 @@ class AgentService:
         self.supabase = supabase or get_supabase_service()
         self.bedrock = bedrock or get_bedrock_client()
 
-    async def build_health_context(self, user_id: str) -> str:
-        """Build context string from user's health data."""
-        context_parts = []
-
-        # Get Whoop data
-        try:
-            from app.services.whoop_sync_service import get_whoop_sync_service
-
-            whoop_service = get_whoop_sync_service()
-            whoop_summary = await whoop_service.get_dashboard_summary(user_id)
-            if whoop_summary.get("is_connected"):
-                recovery = whoop_summary.get("latest_recovery_score")
-                sleep_hrs = whoop_summary.get("latest_sleep_hours")
-                hrv = whoop_summary.get("latest_hrv")
-                rhr = whoop_summary.get("latest_resting_hr")
-                strain = whoop_summary.get("latest_strain_score")
-                workouts = whoop_summary.get("total_workouts_7d", 0)
-
-                context_parts.append(
-                    f"""Whoop Data:
-- Recovery Score: {f'{recovery:.0f}%' if recovery else 'N/A'}
-- Sleep: {f'{sleep_hrs:.1f} hours' if sleep_hrs else 'N/A'}
-- HRV: {f'{hrv:.0f} ms' if hrv else 'N/A'}
-- Resting HR: {f'{rhr:.0f} bpm' if rhr else 'N/A'}
-- Strain Score: {f'{strain:.1f}' if strain else 'N/A'}
-- Workouts (7 days): {workouts}"""
-                )
-        except Exception as e:
-            logger.warning(f"Failed to get Whoop data: {e}")
-
-        # Get Nutrition data
-        try:
-            from app.services.nutrition_service import get_nutrition_service
-
-            nutrition_service = get_nutrition_service()
-            nutrition_summary = await nutrition_service.get_daily_summary(
-                user_id, date.today()
-            )
-            if nutrition_summary:
-                cals = nutrition_summary.get("total_calories", 0)
-                protein = nutrition_summary.get("total_protein_g", 0)
-                carbs = nutrition_summary.get("total_carbs_g", 0)
-                fat = nutrition_summary.get("total_fat_g", 0)
-
-                context_parts.append(
-                    f"""Today's Nutrition:
-- Calories: {cals:.0f} kcal
-- Protein: {protein:.0f}g
-- Carbs: {carbs:.0f}g
-- Fat: {fat:.0f}g"""
-                )
-        except Exception as e:
-            logger.warning(f"Failed to get nutrition data: {e}")
-
-        # Get Workout data
-        try:
-            from app.services.workout_service import get_workout_service
-
-            workout_service = get_workout_service()
-            workout_summary = await workout_service.get_daily_summary(
-                user_id, date.today()
-            )
-            if workout_summary and workout_summary.get("total_sessions", 0) > 0:
-                sessions = workout_summary.get("total_sessions", 0)
-                sets = workout_summary.get("total_sets", 0)
-                duration = workout_summary.get("total_duration_minutes", 0)
-                volume = workout_summary.get("total_volume_kg")
-                distance = workout_summary.get("total_distance_meters")
-                exercises = workout_summary.get("exercises", [])
-
-                exercise_list = ", ".join([ex.get("exercise_name", "") for ex in exercises[:5]])
-
-                workout_text = f"""Today's Workouts:
-- Sessions: {sessions}
-- Total Sets: {sets}
-- Duration: {duration} minutes"""
-
-                if volume:
-                    workout_text += f"\n- Total Volume: {volume:.0f} kg"
-                if distance:
-                    workout_text += f"\n- Total Distance: {distance:.0f} m"
-                if exercise_list:
-                    workout_text += f"\n- Exercises: {exercise_list}"
-
-                context_parts.append(workout_text)
-        except Exception as e:
-            logger.warning(f"Failed to get workout data: {e}")
-
-        if not context_parts:
-            return "No health data available yet. The user should connect their Whoop device, log meals, or track workouts to get personalized insights."
-
-        return "\n\n".join(context_parts)
-
     async def send_message(
         self,
         user_id: str,
@@ -139,7 +91,7 @@ class AgentService:
         conversation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Send a message and get AI response.
+        Send a message and get AI response via agentic tool-use loop.
 
         Args:
             user_id: User's ID
@@ -147,7 +99,7 @@ class AgentService:
             conversation_id: Optional existing conversation ID
 
         Returns:
-            Dict with 'message' (AI response) and 'conversation_id'
+            Dict with 'message' (AI response), 'conversation_id', and 'tool_actions'
         """
         # Create or get conversation
         if conversation_id:
@@ -160,26 +112,99 @@ class AgentService:
         # Save user message
         self._save_message(conversation_id, "user", content)
 
-        # Get conversation history
+        # Load conversation history from DB and format for Converse API
         history = self._get_messages(conversation_id)
-
-        # Build messages for Bedrock
         messages = [
-            {"role": msg["role"], "content": msg["content"]} for msg in history
+            {"role": msg["role"], "content": [{"text": msg["content"]}]}
+            for msg in history
         ]
 
-        # Build system prompt with health context
-        health_context = await self.build_health_context(user_id)
-        system_prompt = SYSTEM_PROMPT.format(health_context=health_context)
+        # Build system prompt
+        system_prompt = SYSTEM_PROMPT.format(today=date.today().isoformat())
 
-        # Get AI response
-        response_text = await self.bedrock.invoke_model(
-            messages=messages,
-            system_prompt=system_prompt,
-        )
+        # Agentic loop
+        tool_actions: List[Dict[str, str]] = []
+        debug_trace: List[Dict[str, Any]] = []
 
-        # Save assistant message
-        assistant_message = self._save_message(
+        for iteration in range(MAX_TOOL_ITERATIONS):
+            response = await self.bedrock.converse(
+                messages=messages,
+                system_prompt=system_prompt,
+                tools=TOOL_DEFINITIONS,
+            )
+
+            assistant_message = response["output"]
+            stop_reason = response["stopReason"]
+
+            if stop_reason == "end_turn":
+                # Extract text from the final response
+                response_text = self._extract_text(assistant_message)
+                break
+
+            elif stop_reason == "tool_use":
+                # Append the assistant's message (with toolUse blocks) to the conversation
+                messages.append(assistant_message)
+
+                # Extract any text the model produced alongside tool calls
+                model_text = self._extract_text(assistant_message)
+                if "sorry" in model_text.lower() and len(model_text) < 60:
+                    model_text = None  # Was the fallback text, not real model output
+
+                # Process each tool use block
+                tool_result_blocks = []
+                for content_block in assistant_message.get("content", []):
+                    if "toolUse" in content_block:
+                        tool_use = content_block["toolUse"]
+                        tool_name = tool_use["name"]
+                        tool_input = tool_use.get("input", {})
+                        tool_use_id = tool_use["toolUseId"]
+
+                        # Execute the tool
+                        result = await execute_tool(tool_name, tool_input, user_id)
+
+                        # Track action for UI display
+                        tool_actions.append({
+                            "tool": tool_name,
+                            "label": get_tool_action_label(tool_name),
+                        })
+
+                        # Track debug trace
+                        debug_trace.append({
+                            "step": iteration + 1,
+                            "tool_name": tool_name,
+                            "tool_input": tool_input,
+                            "tool_output": result,
+                            "model_text": model_text,
+                        })
+
+                        # Build toolResult block
+                        tool_result_blocks.append({
+                            "toolResult": {
+                                "toolUseId": tool_use_id,
+                                "content": [{"json": result}],
+                            }
+                        })
+
+                # Append user message with tool results
+                messages.append({
+                    "role": "user",
+                    "content": tool_result_blocks,
+                })
+
+            else:
+                # Unexpected stop reason — extract whatever text exists
+                response_text = self._extract_text(assistant_message)
+                logger.warning(f"Unexpected stop reason: {stop_reason}")
+                break
+        else:
+            # Max iterations reached — extract whatever text the model produced
+            response_text = self._extract_text(assistant_message)
+            logger.warning(
+                f"Agent loop hit max iterations ({MAX_TOOL_ITERATIONS})"
+            )
+
+        # Save assistant message to DB
+        saved_message = self._save_message(
             conversation_id, "assistant", response_text
         )
 
@@ -188,10 +213,25 @@ class AgentService:
             title = content[:50] + "..." if len(content) > 50 else content
             self._update_conversation_title(conversation_id, title)
 
-        return {
-            "message": assistant_message,
+        result = {
+            "message": saved_message,
             "conversation_id": conversation_id,
+            "tool_actions": tool_actions,
         }
+
+        # Only include debug trace in development
+        if self.settings.is_development and debug_trace:
+            result["debug_trace"] = debug_trace
+
+        return result
+
+    def _extract_text(self, message: Dict[str, Any]) -> str:
+        """Extract text content from a Converse API message."""
+        texts = []
+        for block in message.get("content", []):
+            if "text" in block:
+                texts.append(block["text"])
+        return "\n".join(texts) if texts else "I'm sorry, I wasn't able to generate a response."
 
     def get_conversations(self, user_id: str) -> List[Dict[str, Any]]:
         """Get all conversations for a user."""

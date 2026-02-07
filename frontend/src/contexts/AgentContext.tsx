@@ -142,6 +142,11 @@ export function AgentProvider({ children }: AgentProviderProps) {
         }
 
         // Replace temp message with real one and add assistant response
+        const assistantMessage = {
+          ...response.message,
+          tool_actions: response.tool_actions,
+          debug_trace: response.debug_trace,
+        };
         setMessages((prev) => {
           // Remove the temp user message
           const filtered = prev.filter((m) => m.id !== tempUserMessage.id);
@@ -154,7 +159,7 @@ export function AgentProvider({ children }: AgentProviderProps) {
               content: content.trim(),
               created_at: tempUserMessage.created_at,
             },
-            response.message,
+            assistantMessage,
           ];
         });
       } catch (err) {
