@@ -16,7 +16,9 @@ import type {
 export async function sendMessage(
   request: SendMessageRequest
 ): Promise<ChatResponse> {
-  const response = await apiClient.post<ChatResponse>('/agent/chat', request);
+  const response = await apiClient.post<ChatResponse>('/agent/chat', request, {
+    timeout: 120000, // 2 minutes — agentic tool loop can take time
+  });
   return response.data;
 }
 

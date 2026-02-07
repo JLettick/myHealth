@@ -63,11 +63,12 @@ export function ChatWindow(): JSX.Element {
               about your recovery, sleep, strain, and nutrition.
             </p>
             <div className="mt-6 space-y-2 text-sm">
-              <p className="text-gray-400">Try asking:</p>
+              <p className="text-gray-400">Try saying:</p>
               <ul className="space-y-1 text-gray-500">
+                <li>"I had chicken and rice for lunch"</li>
+                <li>"I just ran 5k in 25 minutes"</li>
                 <li>"How is my recovery today?"</li>
-                <li>"What can I do to improve my sleep?"</li>
-                <li>"Am I getting enough protein?"</li>
+                <li>"What are my macros so far?"</li>
               </ul>
             </div>
           </div>

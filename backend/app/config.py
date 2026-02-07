@@ -114,8 +114,8 @@ class Settings(BaseSettings):
     aws_access_key_id: str = Field(default="", description="AWS access key ID")
     aws_secret_access_key: str = Field(default="", description="AWS secret access key")
     bedrock_model_id: str = Field(
-        default="anthropic.claude-3-sonnet-20240229-v1:0",
-        description="AWS Bedrock model ID"
+        default="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        description="AWS Bedrock model ID (cross-region inference)"
     )
 
     @property

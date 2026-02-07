@@ -1,11 +1,10 @@
 """
-AWS Bedrock client for invoking foundation models.
+AWS Bedrock client using the Converse API.
 
 Provides a wrapper around boto3 Bedrock Runtime client for
-invoking Claude models with conversation history.
+invoking Claude models with conversation history and tool use.
 """
 
-import json
 import logging
 from typing import Optional, Dict, Any, List
 
@@ -27,7 +26,7 @@ class BedrockAPIError(Exception):
 
 
 class BedrockClient:
-    """Client for AWS Bedrock Runtime API."""
+    """Client for AWS Bedrock Runtime Converse API."""
 
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings or get_settings()
@@ -51,68 +50,80 @@ class BedrockClient:
         return self._client
 
     def _consolidate_messages(
-        self, messages: List[Dict[str, str]]
-    ) -> List[Dict[str, str]]:
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """
-        Consolidate consecutive same-role messages.
+        Consolidate consecutive same-role messages into Converse API format.
 
         Claude requires alternating user/assistant roles. This merges
-        consecutive messages with the same role into one.
+        consecutive messages with the same role and formats content
+        as content blocks: [{"text": "..."}].
         """
         if not messages:
             return []
 
         consolidated = []
         for msg in messages:
-            if consolidated and consolidated[-1]["role"] == msg["role"]:
-                # Merge with previous message of same role
-                consolidated[-1]["content"] += "\n\n" + msg["content"]
+            role = msg["role"]
+            content = msg.get("content", [])
+
+            # Convert plain string content to content block format
+            if isinstance(content, str):
+                content = [{"text": content}]
+
+            if consolidated and consolidated[-1]["role"] == role:
+                # Merge content blocks with previous message of same role
+                consolidated[-1]["content"].extend(content)
             else:
-                consolidated.append({"role": msg["role"], "content": msg["content"]})
+                consolidated.append({"role": role, "content": list(content)})
 
         return consolidated
 
-    async def invoke_model(
+    async def converse(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         system_prompt: str,
-        max_tokens: int = 1024,
-    ) -> str:
+        tools: Optional[List[Dict[str, Any]]] = None,
+        max_tokens: int = 4096,
+    ) -> Dict[str, Any]:
         """
-        Invoke Bedrock model with conversation messages.
+        Call Bedrock Converse API with conversation messages and optional tools.
 
         Args:
             messages: List of message dicts with 'role' and 'content'
+                      (content can be string or content blocks)
             system_prompt: System prompt for the model
+            tools: Optional list of tool definitions in Converse API format
             max_tokens: Maximum tokens in response
 
         Returns:
-            Model's text response
+            Dict with 'output' (message dict) and 'stopReason'
 
         Raises:
             BedrockAPIError: If the API call fails
         """
         try:
-            # Consolidate consecutive same-role messages
             consolidated_messages = self._consolidate_messages(messages)
 
-            # Format for Claude models on Bedrock
-            body = {
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": max_tokens,
-                "system": system_prompt,
+            kwargs: Dict[str, Any] = {
+                "modelId": self.settings.bedrock_model_id,
                 "messages": consolidated_messages,
+                "system": [{"text": system_prompt}],
+                "inferenceConfig": {
+                    "maxTokens": max_tokens,
+                    "temperature": 0.7,
+                },
             }
 
-            response = self.client.invoke_model(
-                modelId=self.settings.bedrock_model_id,
-                contentType="application/json",
-                accept="application/json",
-                body=json.dumps(body),
-            )
+            if tools:
+                kwargs["toolConfig"] = {"tools": tools}
 
-            response_body = json.loads(response["body"].read())
-            return response_body["content"][0]["text"]
+            response = self.client.converse(**kwargs)
+
+            return {
+                "output": response["output"]["message"],
+                "stopReason": response["stopReason"],
+            }
 
         except NoCredentialsError:
             logger.error("AWS credentials not found")
@@ -138,6 +149,9 @@ class BedrockClient:
                 )
             else:
                 raise BedrockAPIError(f"Bedrock error: {error_message}", 500)
+
+        except BedrockAPIError:
+            raise
 
         except Exception as e:
             logger.error(f"Unexpected error invoking Bedrock: {e}")
