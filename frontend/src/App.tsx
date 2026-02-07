@@ -8,6 +8,7 @@ import { WhoopProvider } from './contexts/WhoopContext';
 import { GarminProvider } from './contexts/GarminContext';
 import { NutritionProvider } from './contexts/NutritionContext';
 import { AgentProvider } from './contexts/AgentContext';
+import { WorkoutProvider } from './contexts/WorkoutContext';
 import { Layout } from './components/layout/Layout';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { HomePage } from './pages/HomePage';
@@ -16,6 +17,7 @@ import { SignupPage } from './pages/SignupPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { NutritionPage } from './pages/NutritionPage';
 import { AgentPage } from './pages/AgentPage';
+import { WorkoutPage } from './pages/WorkoutPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
 /**
@@ -29,6 +31,7 @@ function App(): JSX.Element {
           <GarminProvider>
             <NutritionProvider>
               <AgentProvider>
+                <WorkoutProvider>
                 <Layout>
             <Routes>
               {/* Public routes */}
@@ -61,11 +64,20 @@ function App(): JSX.Element {
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/workout"
+                element={
+                  <ProtectedRoute>
+                    <WorkoutPage />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* 404 catch-all */}
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
                 </Layout>
+                </WorkoutProvider>
               </AgentProvider>
             </NutritionProvider>
           </GarminProvider>

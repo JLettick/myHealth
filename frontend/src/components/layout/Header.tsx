@@ -44,6 +44,12 @@ export function Header(): JSX.Element {
                   Nutrition
                 </Link>
                 <Link
+                  to="/workout"
+                  className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  Workouts
+                </Link>
+                <Link
                   to="/agent"
                   className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
                 >
