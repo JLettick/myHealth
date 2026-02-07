@@ -4,7 +4,7 @@ API v1 router that aggregates all endpoint routers.
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import agent, auth, garmin, health, nutrition, users, whoop
+from app.api.v1.endpoints import agent, auth, garmin, health, nutrition, users, whoop, workout
 
 # Create main API router
 api_router = APIRouter()
@@ -50,4 +50,10 @@ api_router.include_router(
     agent.router,
     prefix="/agent",
     tags=["AI Agent"],
+)
+
+api_router.include_router(
+    workout.router,
+    prefix="/workout",
+    tags=["Workout"],
 )

@@ -17,7 +17,7 @@ from app.services.bedrock_client import get_bedrock_client, BedrockClient
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a helpful health and fitness assistant for the myHealth app.
-You have access to the user's health data from their Whoop device and nutrition logs.
+You have access to the user's health data from their Whoop device, nutrition logs, and workout logs.
 Provide personalized, actionable advice based on their data.
 Be encouraging but honest. If you notice concerning patterns, suggest consulting a healthcare professional.
 Keep responses concise and focused.
@@ -93,8 +93,42 @@ class AgentService:
         except Exception as e:
             logger.warning(f"Failed to get nutrition data: {e}")
 
+        # Get Workout data
+        try:
+            from app.services.workout_service import get_workout_service
+
+            workout_service = get_workout_service()
+            workout_summary = await workout_service.get_daily_summary(
+                user_id, date.today()
+            )
+            if workout_summary and workout_summary.get("total_sessions", 0) > 0:
+                sessions = workout_summary.get("total_sessions", 0)
+                sets = workout_summary.get("total_sets", 0)
+                duration = workout_summary.get("total_duration_minutes", 0)
+                volume = workout_summary.get("total_volume_kg")
+                distance = workout_summary.get("total_distance_meters")
+                exercises = workout_summary.get("exercises", [])
+
+                exercise_list = ", ".join([ex.get("exercise_name", "") for ex in exercises[:5]])
+
+                workout_text = f"""Today's Workouts:
+- Sessions: {sessions}
+- Total Sets: {sets}
+- Duration: {duration} minutes"""
+
+                if volume:
+                    workout_text += f"\n- Total Volume: {volume:.0f} kg"
+                if distance:
+                    workout_text += f"\n- Total Distance: {distance:.0f} m"
+                if exercise_list:
+                    workout_text += f"\n- Exercises: {exercise_list}"
+
+                context_parts.append(workout_text)
+        except Exception as e:
+            logger.warning(f"Failed to get workout data: {e}")
+
         if not context_parts:
-            return "No health data available yet. The user should connect their Whoop device and log meals to get personalized insights."
+            return "No health data available yet. The user should connect their Whoop device, log meals, or track workouts to get personalized insights."
 
         return "\n\n".join(context_parts)
 
