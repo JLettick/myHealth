@@ -78,9 +78,9 @@ class LoginRequest(BaseModel):
 
 
 class RefreshTokenRequest(BaseModel):
-    """Schema for token refresh request."""
+    """Schema for token refresh request (body is optional; cookie is preferred)."""
 
-    refresh_token: str = Field(..., description="The refresh token")
+    refresh_token: Optional[str] = Field(None, description="The refresh token (fallback if no cookie)")
 
     model_config = {
         "json_schema_extra": {
@@ -95,7 +95,7 @@ class TokenResponse(BaseModel):
     """Schema for authentication token response."""
 
     access_token: str = Field(..., description="JWT access token")
-    refresh_token: str = Field(..., description="JWT refresh token")
+    refresh_token: Optional[str] = Field(None, description="JWT refresh token (omitted when sent as httpOnly cookie)")
     token_type: str = Field(default="Bearer", description="Token type")
     expires_in: int = Field(..., description="Seconds until access token expiration")
     expires_at: datetime = Field(..., description="Timestamp when access token expires")

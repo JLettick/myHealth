@@ -304,7 +304,7 @@ npm install
 cp .env.example .env
 
 # Edit .env
-# VITE_API_URL=http://localhost:8000/api/v1
+# VITE_API_URL=/api/v1   (same-origin; Vite proxy forwards to localhost:8000)
 
 # Start development server
 npm run dev
@@ -387,7 +387,9 @@ npm run lint
 - Check that the frontend is making requests to the correct API URL
 
 **Token Errors**
-- Clear browser storage and log in again
+- Refresh tokens are stored as httpOnly cookies — they are not visible in JavaScript or localStorage
+- To debug: Check DevTools → Application → Cookies for the `refresh_token` cookie on `/api/v1/auth` path
+- Access tokens are in memory only and lost on page refresh (re-acquired via `/auth/refresh` cookie)
 - Check that Supabase credentials are correct
 - Verify the backend can reach Supabase (network/firewall)
 

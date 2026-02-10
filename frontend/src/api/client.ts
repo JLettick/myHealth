@@ -3,7 +3,7 @@
  *
  * Automatically handles:
  * - Adding Authorization header to requests
- * - Refreshing expired tokens
+ * - Refreshing expired tokens (via httpOnly cookie)
  * - Redirecting to login on auth failure
  */
 
@@ -24,6 +24,7 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: 30000, // 30 second timeout
+  withCredentials: true, // Send httpOnly cookies with every request
 });
 
 // Flag to prevent multiple simultaneous refresh attempts
@@ -100,16 +101,6 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
-      const refreshToken = tokenStorage.getRefreshToken();
-
-      if (!refreshToken) {
-        // No refresh token, redirect to login
-        logger.info('No refresh token, redirecting to login');
-        tokenStorage.clearTokens();
-        window.location.href = '/login';
-        return Promise.reject(error);
-      }
-
       if (isRefreshing) {
         // Wait for the ongoing refresh to complete
         const token = await subscribeTokenRefresh();
@@ -124,18 +115,20 @@ apiClient.interceptors.response.use(
       try {
         logger.info('Attempting token refresh');
 
-        // Call refresh endpoint
+        // Call refresh endpoint — httpOnly cookie is sent automatically
         const response = await axios.post<AuthResponse>(
           `${API_URL}/auth/refresh`,
-          { refresh_token: refreshToken },
-          { headers: { 'Content-Type': 'application/json' } }
+          {},
+          {
+            headers: { 'Content-Type': 'application/json' },
+            withCredentials: true,
+          }
         );
 
         const { session } = response.data;
 
-        // Store new tokens
+        // Store new access token in memory
         tokenStorage.setAccessToken(session.access_token);
-        tokenStorage.setRefreshToken(session.refresh_token);
 
         logger.info('Token refresh successful');
 

@@ -13,8 +13,9 @@ A full-stack health tracking web application that aggregates fitness data from m
 
 ### Core Features
 - User registration and authentication
-- Secure session management with JWT tokens
-- Token refresh for seamless user experience
+- Secure session management with JWT tokens and httpOnly cookie refresh tokens
+- Token refresh for seamless user experience (survives page refresh)
+- Per-endpoint rate limiting (slowapi) to prevent brute force
 - Protected routes for authenticated users
 - Responsive design with Tailwind CSS
 - Structured logging for debugging
@@ -66,7 +67,7 @@ myHealth/
 │   │   │   ├── whoop_sync_service.py
 │   │   │   ├── nutrition_service.py  # Nutrition CRUD
 │   │   │   └── usda_service.py       # USDA food database API
-│   │   ├── middleware/     # CORS, logging middleware
+│   │   ├── middleware/     # CORS, logging, rate limiting middleware
 │   │   ├── config.py       # Configuration
 │   │   ├── dependencies.py # Auth dependencies
 │   │   └── main.py         # Application entry
@@ -131,9 +132,11 @@ See [API.md](./API.md) for detailed API documentation.
 ## Security
 
 - Passwords validated for complexity (uppercase, lowercase, digit, special char)
-- JWT tokens with short expiration (1 hour)
-- Refresh token rotation
-- CORS restricted to specific origins
+- JWT access tokens with short expiration (1 hour), stored in memory only
+- Refresh tokens in httpOnly cookies (not accessible via JavaScript — XSS resistant)
+- `SameSite=Lax` cookies for CSRF protection
+- Per-endpoint rate limiting via slowapi (auth and AI chat endpoints)
+- CORS restricted to specific origins with `allow_credentials=True`
 - Row Level Security (RLS) in Supabase
 - Input validation with Pydantic
 - Non-root Docker containers

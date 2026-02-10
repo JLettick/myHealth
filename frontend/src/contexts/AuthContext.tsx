@@ -3,6 +3,9 @@
  *
  * Manages global authentication state and provides auth methods
  * to all components in the application.
+ *
+ * Access tokens are stored in memory only. On page refresh, the token
+ * is re-acquired via /auth/refresh (httpOnly cookie sent automatically).
  */
 
 import React, {
@@ -112,9 +115,8 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
       try {
         const response = await authApi.login(data);
 
-        // Store tokens
+        // Store access token in memory only
         tokenStorage.setAccessToken(response.session.access_token);
-        tokenStorage.setRefreshToken(response.session.refresh_token);
 
         // Update state
         setUser(response.user);
@@ -151,9 +153,8 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
           return;
         }
 
-        // Store tokens
+        // Store access token in memory only
         tokenStorage.setAccessToken(response.session.access_token);
-        tokenStorage.setRefreshToken(response.session.refresh_token);
 
         // Update state
         setUser(response.user);
@@ -190,24 +191,37 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
 
   /**
    * Check authentication status on mount.
+   *
+   * If an access token exists in memory, validate it via /auth/me.
+   * Otherwise, attempt to refresh using the httpOnly cookie.
+   * If both fail, the user is not authenticated.
    */
   useEffect(() => {
     const checkAuth = async () => {
+      // If we have an access token in memory, try to use it
       const accessToken = tokenStorage.getAccessToken();
-      const refreshToken = tokenStorage.getRefreshToken();
 
-      if (!accessToken && !refreshToken) {
-        setState((prev) => ({ ...prev, isLoading: false }));
-        return;
+      if (accessToken) {
+        try {
+          const user = await authApi.getCurrentUser();
+          setUser(user);
+          logger.info('Auth check successful', { userId: user.id });
+          return;
+        } catch {
+          // Access token expired, fall through to refresh
+          logger.debug('Access token invalid, attempting refresh');
+        }
       }
 
+      // No access token or it was invalid — try refreshing via cookie
       try {
-        // Try to get current user
-        const user = await authApi.getCurrentUser();
-        setUser(user);
-        logger.info('Auth check successful', { userId: user.id });
-      } catch (error) {
-        logger.warn('Auth check failed, clearing tokens');
+        const response = await authApi.refreshToken();
+        tokenStorage.setAccessToken(response.session.access_token);
+        setUser(response.user);
+        logger.info('Auth restored via refresh', { userId: response.user.id });
+      } catch {
+        // No valid session — user is not authenticated
+        logger.debug('No valid session, user not authenticated');
         tokenStorage.clearTokens();
         setState((prev) => ({ ...prev, isLoading: false }));
       }
