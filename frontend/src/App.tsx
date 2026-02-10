@@ -18,6 +18,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { NutritionPage } from './pages/NutritionPage';
 import { AgentPage } from './pages/AgentPage';
 import { WorkoutPage } from './pages/WorkoutPage';
+import { AccountPage } from './pages/AccountPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
 /**
@@ -69,6 +70,14 @@ function App(): JSX.Element {
                 element={
                   <ProtectedRoute>
                     <WorkoutPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/account"
+                element={
+                  <ProtectedRoute>
+                    <AccountPage />
                   </ProtectedRoute>
                 }
               />

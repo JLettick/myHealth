@@ -220,29 +220,6 @@ export function DashboardPage(): JSX.Element {
 
       {/* Source-specific Dashboard */}
       {selectedSource === 'whoop' ? renderWhoopDashboard() : renderGarminDashboard()}
-
-      {/* Account Info */}
-      <div className="mt-8 bg-white p-6 rounded-xl shadow-md">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          Account Information
-        </h3>
-        <div className="space-y-2">
-          <p className="text-gray-600">
-            <span className="font-medium">Email:</span> {user?.email}
-          </p>
-          {user?.full_name && (
-            <p className="text-gray-600">
-              <span className="font-medium">Name:</span> {user.full_name}
-            </p>
-          )}
-          <p className="text-gray-600">
-            <span className="font-medium">Member since:</span>{' '}
-            {user?.created_at
-              ? new Date(user.created_at).toLocaleDateString()
-              : 'N/A'}
-          </p>
-        </div>
-      </div>
     </div>
   );
 }
