@@ -56,9 +56,13 @@ export function Header(): JSX.Element {
                   AI Assistant
                 </Link>
                 <div className="flex items-center space-x-3">
-                  <span className="text-sm text-gray-600">
-                    {user?.full_name || user?.email}
-                  </span>
+                  <Link
+                    to="/account"
+                    className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors"
+                    title="Account"
+                  >
+                    {(user?.full_name || user?.email || '?').charAt(0).toUpperCase()}
+                  </Link>
                   <Button variant="secondary" onClick={handleLogout}>
                     Logout
                   </Button>
