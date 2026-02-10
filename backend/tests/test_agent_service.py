@@ -316,10 +316,22 @@ class TestSendMessageAgenticLoop:
 
     @pytest.mark.asyncio
     async def test_max_iterations_safety(self, service, mock_bedrock, user_id):
-        """Test that the loop stops after MAX_TOOL_ITERATIONS."""
-        # Always return tool_use to trigger infinite loop
-        mock_bedrock.converse = AsyncMock(
-            return_value={
+        """Test that the loop stops after MAX_TOOL_ITERATIONS and makes a final summary call."""
+        call_count = 0
+
+        async def mock_converse(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            # The last call (26th) is the final summary call without tools
+            if "tools" not in kwargs:
+                return {
+                    "output": {
+                        "role": "assistant",
+                        "content": [{"text": "Here's a summary of what I did."}],
+                    },
+                    "stopReason": "end_turn",
+                }
+            return {
                 "output": {
                     "role": "assistant",
                     "content": [
@@ -335,14 +347,15 @@ class TestSendMessageAgenticLoop:
                 },
                 "stopReason": "tool_use",
             }
-        )
+
+        mock_bedrock.converse = mock_converse
 
         service._create_conversation = MagicMock(return_value="conv-new")
         service._save_message = MagicMock(
             return_value={
                 "id": "msg-1",
                 "role": "assistant",
-                "content": "Let me check...",
+                "content": "Here's a summary of what I did.",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -359,7 +372,9 @@ class TestSendMessageAgenticLoop:
         ) as mock_exec:
             result = await service.send_message(user_id, "test")
 
-        # Should have been called exactly MAX_TOOL_ITERATIONS times
-        assert mock_exec.call_count == 15
-        # Should still return a response
-        assert result["message"]["content"] is not None
+        # Should have been called exactly MAX_TOOL_ITERATIONS (25) times
+        assert mock_exec.call_count == 25
+        # 25 loop calls + 1 final summary call = 26
+        assert call_count == 26
+        # Should return the summary response
+        assert result["message"]["content"] == "Here's a summary of what I did."

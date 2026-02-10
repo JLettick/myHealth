@@ -21,7 +21,7 @@ from app.services.agent_tools import (
 
 logger = logging.getLogger(__name__)
 
-MAX_TOOL_ITERATIONS = 15
+MAX_TOOL_ITERATIONS = 25
 
 SYSTEM_PROMPT = """You are a helpful health and fitness assistant for the myHealth app.
 You can read and write the user's health data using the tools provided.
@@ -197,11 +197,25 @@ class AgentService:
                 logger.warning(f"Unexpected stop reason: {stop_reason}")
                 break
         else:
-            # Max iterations reached — extract whatever text the model produced
-            response_text = self._extract_text(assistant_message)
+            # Max iterations reached — make one final call without tools
+            # so the model can produce a proper summary response
             logger.warning(
                 f"Agent loop hit max iterations ({MAX_TOOL_ITERATIONS})"
             )
+            messages.append(assistant_message)
+            messages.append({
+                "role": "user",
+                "content": [{"text": "You've reached the maximum number of tool calls. Please provide a complete summary of what you accomplished and what remains."}],
+            })
+            try:
+                final_response = await self.bedrock.converse(
+                    messages=messages,
+                    system_prompt=system_prompt,
+                )
+                response_text = self._extract_text(final_response["output"])
+            except Exception as e:
+                logger.error(f"Failed to get final summary: {e}")
+                response_text = self._extract_text(assistant_message)
 
         # Save assistant message to DB
         saved_message = self._save_message(
