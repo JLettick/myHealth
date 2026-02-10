@@ -8,6 +8,8 @@ import React, {
   useState,
   useCallback,
   useEffect,
+  useMemo,
+  useRef,
 } from 'react';
 import type { ChatMessage, Conversation } from '../types/agent';
 import {
@@ -60,6 +62,22 @@ export function AgentProvider({ children }: AgentProviderProps) {
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Ref to track latest conversationId (avoids stale closure in sendMessage)
+  const conversationIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
+
+  // Ref for aborting in-flight agent chat requests
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Abort in-flight request on unmount
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
   // Clear error
   const clearError = useCallback(() => {
     setError(null);
@@ -85,6 +103,7 @@ export function AgentProvider({ children }: AgentProviderProps) {
     async (id: string) => {
       if (!isAuthenticated) return;
 
+      abortControllerRef.current?.abort();
       setIsLoading(true);
       setError(null);
 
@@ -106,6 +125,7 @@ export function AgentProvider({ children }: AgentProviderProps) {
 
   // Start a new conversation
   const newConversation = useCallback(() => {
+    abortControllerRef.current?.abort();
     setConversationId(null);
     setMessages([]);
     setError(null);
@@ -115,6 +135,11 @@ export function AgentProvider({ children }: AgentProviderProps) {
   const sendMessage = useCallback(
     async (content: string) => {
       if (!isAuthenticated || !content.trim()) return;
+
+      // Abort any previous in-flight request
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
       setIsSending(true);
       setError(null);
@@ -129,13 +154,17 @@ export function AgentProvider({ children }: AgentProviderProps) {
       setMessages((prev) => [...prev, tempUserMessage]);
 
       try {
-        const response = await sendMessageApi({
-          content: content.trim(),
-          conversation_id: conversationId || undefined,
-        });
+        const currentConversationId = conversationIdRef.current;
+        const response = await sendMessageApi(
+          {
+            content: content.trim(),
+            conversation_id: currentConversationId || undefined,
+          },
+          controller.signal
+        );
 
         // Update conversation ID if this is a new conversation
-        if (!conversationId) {
+        if (!currentConversationId) {
           setConversationId(response.conversation_id);
           // Refresh conversations list to include the new one
           refreshConversations();
@@ -163,6 +192,9 @@ export function AgentProvider({ children }: AgentProviderProps) {
           ];
         });
       } catch (err) {
+        // Ignore aborted requests
+        if (controller.signal.aborted) return;
+
         // Remove the optimistic message on error
         setMessages((prev) => prev.filter((m) => m.id !== tempUserMessage.id));
 
@@ -171,10 +203,12 @@ export function AgentProvider({ children }: AgentProviderProps) {
         setError(message);
         logger.error('Failed to send message', { error: err });
       } finally {
-        setIsSending(false);
+        if (!controller.signal.aborted) {
+          setIsSending(false);
+        }
       }
     },
-    [isAuthenticated, conversationId, refreshConversations]
+    [isAuthenticated, refreshConversations]
   );
 
   // Delete a conversation
@@ -202,31 +236,45 @@ export function AgentProvider({ children }: AgentProviderProps) {
     [isAuthenticated, conversationId, newConversation]
   );
 
-  // Load conversations on mount
+  // Clear state on logout
   useEffect(() => {
-    if (isAuthenticated) {
-      refreshConversations();
-    } else {
+    if (!isAuthenticated) {
       setConversations([]);
       setMessages([]);
       setConversationId(null);
     }
-  }, [isAuthenticated, refreshConversations]);
+  }, [isAuthenticated]);
 
-  const value: AgentContextValue = {
-    messages,
-    conversationId,
-    conversations,
-    isLoading,
-    isSending,
-    error,
-    sendMessage,
-    loadConversation,
-    newConversation,
-    deleteConversation,
-    refreshConversations,
-    clearError,
-  };
+  const value = useMemo<AgentContextValue>(
+    () => ({
+      messages,
+      conversationId,
+      conversations,
+      isLoading,
+      isSending,
+      error,
+      sendMessage,
+      loadConversation,
+      newConversation,
+      deleteConversation,
+      refreshConversations,
+      clearError,
+    }),
+    [
+      messages,
+      conversationId,
+      conversations,
+      isLoading,
+      isSending,
+      error,
+      sendMessage,
+      loadConversation,
+      newConversation,
+      deleteConversation,
+      refreshConversations,
+      clearError,
+    ]
+  );
 
   return (
     <AgentContext.Provider value={value}>{children}</AgentContext.Provider>

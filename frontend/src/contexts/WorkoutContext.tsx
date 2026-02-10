@@ -8,6 +8,7 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useMemo,
 } from 'react';
 import {
   getLocalDateString,
@@ -57,6 +58,7 @@ interface WorkoutContextValue {
 
   // Session actions
   refresh: () => Promise<void>;
+  refreshGoals: () => Promise<void>;
   addSession: (session: WorkoutSessionCreate) => Promise<WorkoutSession | null>;
   editSession: (sessionId: string, updates: WorkoutSessionUpdate) => Promise<void>;
   removeSession: (sessionId: string) => Promise<void>;
@@ -316,55 +318,78 @@ export function WorkoutProvider({ children }: WorkoutProviderProps) {
     []
   );
 
-  // Load goals on mount and when auth changes
+  // Clear state on logout
   useEffect(() => {
-    if (isAuthenticated) {
-      refreshGoals();
-    } else {
+    if (!isAuthenticated) {
       setGoals(null);
-    }
-  }, [isAuthenticated, refreshGoals]);
-
-  // Load daily summary when auth or date changes
-  useEffect(() => {
-    if (isAuthenticated) {
-      refresh();
-    } else {
       setDailySummary(null);
+      setExercises([]);
       setError(null);
     }
-  }, [isAuthenticated, selectedDate, refresh]);
+  }, [isAuthenticated]);
 
-  // Load exercises on mount
+  // Re-fetch daily summary when selectedDate changes (skip initial mount)
+  const workoutDateInitRef = React.useRef(true);
   useEffect(() => {
-    if (isAuthenticated) {
-      loadExercises();
+    if (workoutDateInitRef.current) {
+      workoutDateInitRef.current = false;
+      return;
     }
-  }, [isAuthenticated, loadExercises]);
+    if (isAuthenticated) {
+      refresh();
+    }
+  }, [selectedDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const value: WorkoutContextValue = {
-    dailySummary,
-    goals,
-    selectedDate,
-    currentSession,
-    exercises,
-    isLoading,
-    error,
-    setSelectedDate,
-    refresh,
-    addSession,
-    editSession,
-    removeSession,
-    loadSession,
-    clearCurrentSession,
-    addSet,
-    editSet,
-    removeSet,
-    updateGoals: updateGoalsFn,
-    loadExercises,
-    createExercise,
-    clearError,
-  };
+  const value = useMemo<WorkoutContextValue>(
+    () => ({
+      dailySummary,
+      goals,
+      selectedDate,
+      currentSession,
+      exercises,
+      isLoading,
+      error,
+      setSelectedDate,
+      refresh,
+      refreshGoals,
+      addSession,
+      editSession,
+      removeSession,
+      loadSession,
+      clearCurrentSession,
+      addSet,
+      editSet,
+      removeSet,
+      updateGoals: updateGoalsFn,
+      loadExercises,
+      createExercise,
+      clearError,
+    }),
+    [
+      dailySummary,
+      goals,
+      selectedDate,
+      currentSession,
+      exercises,
+      isLoading,
+      error,
+      setSelectedDate,
+      refresh,
+      refreshGoals,
+      addSession,
+      editSession,
+      removeSession,
+      loadSession,
+      clearCurrentSession,
+      addSet,
+      editSet,
+      removeSet,
+      updateGoalsFn,
+      loadExercises,
+      createExercise,
+      clearError,
+    ]
+  );
 
   return (
     <WorkoutContext.Provider value={value}>

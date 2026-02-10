@@ -8,6 +8,7 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useMemo,
 } from 'react';
 import {
   getLocalDateString,
@@ -42,6 +43,7 @@ interface NutritionContextValue {
   // Actions
   setSelectedDate: (date: string) => void;
   refresh: () => Promise<void>;
+  refreshGoals: () => Promise<void>;
   addEntry: (entry: FoodEntryCreate) => Promise<FoodEntry | null>;
   updateEntry: (entryId: string, updates: FoodEntryUpdate) => Promise<void>;
   removeEntry: (entryId: string) => Promise<void>;
@@ -168,39 +170,59 @@ export function NutritionProvider({ children }: NutritionProviderProps) {
     []
   );
 
-  // Load goals on mount and when auth changes (not on date change)
+  // Clear state on logout
   useEffect(() => {
-    if (isAuthenticated) {
-      refreshGoals();
-    } else {
+    if (!isAuthenticated) {
       setGoals(null);
-    }
-  }, [isAuthenticated, refreshGoals]);
-
-  // Load daily summary when auth or date changes
-  useEffect(() => {
-    if (isAuthenticated) {
-      refresh();
-    } else {
       setDailySummary(null);
       setError(null);
     }
-  }, [isAuthenticated, selectedDate, refresh]);
+  }, [isAuthenticated]);
 
-  const value: NutritionContextValue = {
-    dailySummary,
-    goals,
-    selectedDate,
-    isLoading,
-    error,
-    setSelectedDate,
-    refresh,
-    addEntry,
-    updateEntry: updateEntryFn,
-    removeEntry,
-    updateGoals: updateGoalsFn,
-    clearError,
-  };
+  // Re-fetch daily summary when selectedDate changes (skip initial mount)
+  const nutritionDateInitRef = React.useRef(true);
+  useEffect(() => {
+    if (nutritionDateInitRef.current) {
+      nutritionDateInitRef.current = false;
+      return;
+    }
+    if (isAuthenticated) {
+      refresh();
+    }
+  }, [selectedDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const value = useMemo<NutritionContextValue>(
+    () => ({
+      dailySummary,
+      goals,
+      selectedDate,
+      isLoading,
+      error,
+      setSelectedDate,
+      refresh,
+      refreshGoals,
+      addEntry,
+      updateEntry: updateEntryFn,
+      removeEntry,
+      updateGoals: updateGoalsFn,
+      clearError,
+    }),
+    [
+      dailySummary,
+      goals,
+      selectedDate,
+      isLoading,
+      error,
+      setSelectedDate,
+      refresh,
+      refreshGoals,
+      addEntry,
+      updateEntryFn,
+      removeEntry,
+      updateGoalsFn,
+      clearError,
+    ]
+  );
 
   return (
     <NutritionContext.Provider value={value}>

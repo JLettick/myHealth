@@ -233,10 +233,13 @@ class NutritionService:
     # SUMMARIES
     # =========================================================================
 
-    async def get_daily_summary(self, user_id: str, summary_date: date) -> dict[str, Any]:
+    async def get_daily_summary(
+        self, user_id: str, summary_date: date, goals: Optional[dict[str, Any]] = None
+    ) -> dict[str, Any]:
         """Get daily nutrition summary with meal breakdowns."""
         entries = await self.get_entries_by_date(user_id, summary_date)
-        goals = await self.get_goals(user_id)
+        if goals is None:
+            goals = await self.get_goals(user_id)
 
         # Group entries by meal type
         meals = []
@@ -285,11 +288,12 @@ class NutritionService:
 
     async def get_weekly_summary(self, user_id: str, start_date: date) -> dict[str, Any]:
         """Get weekly nutrition summary."""
+        goals = await self.get_goals(user_id)
         daily_summaries = []
 
         for i in range(7):
             day = start_date + timedelta(days=i)
-            summary = await self.get_daily_summary(user_id, day)
+            summary = await self.get_daily_summary(user_id, day, goals=goals)
             daily_summaries.append(summary)
 
         # Calculate averages

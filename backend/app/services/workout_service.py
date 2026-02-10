@@ -262,16 +262,28 @@ class WorkoutService:
             .execute()
         )
 
+        if not response.data:
+            return []
+
+        session_ids = [s["id"] for s in response.data]
+
+        # Fetch all sets for all sessions in one query to get counts
+        sets_response = (
+            self.supabase.admin_client.table("workout_sets")
+            .select("session_id")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+
+        # Count sets per session
+        set_counts: dict[str, int] = {}
+        for s in sets_response.data:
+            sid = s["session_id"]
+            set_counts[sid] = set_counts.get(sid, 0) + 1
+
         sessions = []
         for session in response.data:
-            # Get set count for each session
-            sets_response = (
-                self.supabase.admin_client.table("workout_sets")
-                .select("id", count="exact")
-                .eq("session_id", session["id"])
-                .execute()
-            )
-            session["total_sets"] = sets_response.count or 0
+            session["total_sets"] = set_counts.get(session["id"], 0)
             session["total_duration_minutes"] = self._compute_session_duration(session)
             sessions.append(session)
 
@@ -292,15 +304,28 @@ class WorkoutService:
             .execute()
         )
 
+        if not response.data:
+            return []
+
+        session_ids = [s["id"] for s in response.data]
+
+        # Fetch all sets for all sessions in one query to get counts
+        sets_response = (
+            self.supabase.admin_client.table("workout_sets")
+            .select("session_id")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+
+        # Count sets per session
+        set_counts: dict[str, int] = {}
+        for s in sets_response.data:
+            sid = s["session_id"]
+            set_counts[sid] = set_counts.get(sid, 0) + 1
+
         sessions = []
         for session in response.data:
-            sets_response = (
-                self.supabase.admin_client.table("workout_sets")
-                .select("id", count="exact")
-                .eq("session_id", session["id"])
-                .execute()
-            )
-            session["total_sets"] = sets_response.count or 0
+            session["total_sets"] = set_counts.get(session["id"], 0)
             session["total_duration_minutes"] = self._compute_session_duration(session)
             sessions.append(session)
 
@@ -311,13 +336,22 @@ class WorkoutService:
     # =========================================================================
 
     async def create_set(
-        self, user_id: str, session_id: str, set_data: dict[str, Any]
+        self, user_id: str, session_id: str, set_data: dict[str, Any],
+        skip_ownership_check: bool = False,
     ) -> Optional[dict[str, Any]]:
         """Add a set to a workout session."""
-        # Verify session belongs to user
-        session = await self.get_session(session_id, user_id)
-        if not session:
-            return None
+        if not skip_ownership_check:
+            # Lightweight ownership check — just verify session exists for this user
+            check_response = (
+                self.supabase.admin_client.table("workout_sessions")
+                .select("id")
+                .eq("id", session_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if not check_response.data:
+                return None
 
         logger.info(f"Creating workout set for session {session_id}")
 
@@ -401,63 +435,80 @@ class WorkoutService:
         sessions = await self.get_sessions_by_date(user_id, summary_date)
         goals = await self.get_goals(user_id)
 
-        # Get all sets for the day with exercise details
         total_sets = 0
         total_duration = 0
         total_volume = Decimal("0")
         total_distance = Decimal("0")
         exercise_summaries = {}
 
-        for session in sessions:
-            full_session = await self.get_session(session["id"], user_id)
-            if not full_session:
-                continue
+        if sessions:
+            session_ids = [s["id"] for s in sessions]
 
-            total_sets += len(full_session.get("sets", []))
-            if full_session.get("total_duration_minutes"):
-                total_duration += full_session["total_duration_minutes"]
+            # Fetch all sets for all sessions in one query with exercise details
+            all_sets_response = (
+                self.supabase.admin_client.table("workout_sets")
+                .select("*, exercises(*)")
+                .in_("session_id", session_ids)
+                .order("set_order")
+                .execute()
+            )
 
-            for workout_set in full_session.get("sets", []):
-                exercise = workout_set.get("exercise", {}) or {}
-                exercise_id = workout_set.get("exercise_id")
+            # Group sets by session_id
+            sets_by_session: dict[str, list] = {}
+            for s in all_sets_response.data:
+                s["exercise"] = s.pop("exercises", None)
+                sid = s["session_id"]
+                if sid not in sets_by_session:
+                    sets_by_session[sid] = []
+                sets_by_session[sid].append(s)
 
-                if exercise_id not in exercise_summaries:
-                    exercise_summaries[exercise_id] = {
-                        "exercise_id": exercise_id,
-                        "exercise_name": exercise.get("name", "Unknown"),
-                        "category": exercise.get("category", "other"),
-                        "total_sets": 0,
-                        "total_reps": 0,
-                        "max_weight_kg": None,
-                        "total_volume_kg": Decimal("0"),
-                        "total_duration_seconds": 0,
-                        "total_distance_meters": Decimal("0"),
-                    }
+            for session in sessions:
+                session_sets = sets_by_session.get(session["id"], [])
+                total_sets += len(session_sets)
+                if session.get("total_duration_minutes"):
+                    total_duration += session["total_duration_minutes"]
 
-                summary = exercise_summaries[exercise_id]
-                summary["total_sets"] += 1
+                for workout_set in session_sets:
+                    exercise = workout_set.get("exercise", {}) or {}
+                    exercise_id = workout_set.get("exercise_id")
 
-                # Strength metrics
-                if workout_set.get("reps"):
-                    summary["total_reps"] += workout_set["reps"]
+                    if exercise_id not in exercise_summaries:
+                        exercise_summaries[exercise_id] = {
+                            "exercise_id": exercise_id,
+                            "exercise_name": exercise.get("name", "Unknown"),
+                            "category": exercise.get("category", "other"),
+                            "total_sets": 0,
+                            "total_reps": 0,
+                            "max_weight_kg": None,
+                            "total_volume_kg": Decimal("0"),
+                            "total_duration_seconds": 0,
+                            "total_distance_meters": Decimal("0"),
+                        }
 
-                if workout_set.get("weight_kg"):
-                    weight = Decimal(str(workout_set["weight_kg"]))
-                    if summary["max_weight_kg"] is None or weight > summary["max_weight_kg"]:
-                        summary["max_weight_kg"] = weight
+                    summary = exercise_summaries[exercise_id]
+                    summary["total_sets"] += 1
+
+                    # Strength metrics
                     if workout_set.get("reps"):
-                        volume = weight * workout_set["reps"]
-                        summary["total_volume_kg"] += volume
-                        total_volume += volume
+                        summary["total_reps"] += workout_set["reps"]
 
-                # Cardio metrics
-                if workout_set.get("duration_seconds"):
-                    summary["total_duration_seconds"] += workout_set["duration_seconds"]
+                    if workout_set.get("weight_kg"):
+                        weight = Decimal(str(workout_set["weight_kg"]))
+                        if summary["max_weight_kg"] is None or weight > summary["max_weight_kg"]:
+                            summary["max_weight_kg"] = weight
+                        if workout_set.get("reps"):
+                            volume = weight * workout_set["reps"]
+                            summary["total_volume_kg"] += volume
+                            total_volume += volume
 
-                if workout_set.get("distance_meters"):
-                    distance = Decimal(str(workout_set["distance_meters"]))
-                    summary["total_distance_meters"] += distance
-                    total_distance += distance
+                    # Cardio metrics
+                    if workout_set.get("duration_seconds"):
+                        summary["total_duration_seconds"] += workout_set["duration_seconds"]
+
+                    if workout_set.get("distance_meters"):
+                        distance = Decimal(str(workout_set["distance_meters"]))
+                        summary["total_distance_meters"] += distance
+                        total_distance += distance
 
         return {
             "date": summary_date,

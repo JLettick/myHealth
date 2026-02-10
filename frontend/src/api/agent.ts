@@ -14,10 +14,12 @@ import type {
  * Send a message to the AI agent and get a response.
  */
 export async function sendMessage(
-  request: SendMessageRequest
+  request: SendMessageRequest,
+  signal?: AbortSignal
 ): Promise<ChatResponse> {
   const response = await apiClient.post<ChatResponse>('/agent/chat', request, {
     timeout: 120000, // 2 minutes — agentic tool loop can take time
+    signal,
   });
   return response.data;
 }
