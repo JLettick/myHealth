@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useWhoop } from '../contexts/WhoopContext';
 import { useGarmin } from '../contexts/GarminContext';
@@ -6,9 +6,19 @@ import { getProfile, updateProfile } from '../api/users';
 import type { UserProfile } from '../api/users';
 
 export function AccountPage(): JSX.Element {
-  const { user } = useAuth();
-  const { isConnected: whoopConnected } = useWhoop();
-  const { isConnected: garminConnected } = useGarmin();
+  const { user, isAuthenticated } = useAuth();
+  const { isConnected: whoopConnected, refresh: refreshWhoop } = useWhoop();
+  const { isConnected: garminConnected, refresh: refreshGarmin } = useGarmin();
+
+  // Load connection statuses on mount
+  const hasLoadedRef = useRef(false);
+  useEffect(() => {
+    if (isAuthenticated && !hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      refreshWhoop();
+      refreshGarmin();
+    }
+  }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [fullName, setFullName] = useState('');

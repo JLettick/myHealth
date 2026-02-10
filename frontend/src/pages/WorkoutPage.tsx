@@ -2,7 +2,8 @@
  * Workout tracking page component (protected).
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { useWorkout } from '../contexts/WorkoutContext';
 import type { WorkoutType } from '../types/workout';
 import {
@@ -14,6 +15,7 @@ import {
 } from '../components/workout';
 
 export function WorkoutPage(): JSX.Element {
+  const { isAuthenticated } = useAuth();
   const {
     dailySummary,
     selectedDate,
@@ -23,7 +25,21 @@ export function WorkoutPage(): JSX.Element {
     error,
     loadSession,
     clearCurrentSession,
+    refresh,
+    refreshGoals,
+    loadExercises,
   } = useWorkout();
+
+  // Load workout data, goals, and exercises on mount
+  const hasLoadedRef = useRef(false);
+  useEffect(() => {
+    if (isAuthenticated && !hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      refresh();
+      refreshGoals();
+      loadExercises();
+    }
+  }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [isAddSessionModalOpen, setIsAddSessionModalOpen] = useState(false);
 

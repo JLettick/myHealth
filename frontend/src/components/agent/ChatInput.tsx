@@ -22,6 +22,7 @@ export function ChatInput({
 }: ChatInputProps): JSX.Element {
   const [content, setContent] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prevTranscriptRef = useRef<string>('');
   const {
     isListening,
     isSupported,
@@ -41,12 +42,22 @@ export function ChatInput({
     }
   }, [content]);
 
-  // Sync speech transcript into the textarea content
+  // Sync speech transcript into the textarea content by appending only the delta
   useEffect(() => {
-    if (transcript) {
+    if (!isListening) {
+      prevTranscriptRef.current = transcript;
+      return;
+    }
+    const prev = prevTranscriptRef.current;
+    if (transcript.length > prev.length && transcript.startsWith(prev)) {
+      const delta = transcript.slice(prev.length);
+      setContent((current) => current + delta);
+    } else if (transcript !== prev) {
+      // Transcript was reset or changed entirely (e.g. new recognition session)
       setContent(transcript);
     }
-  }, [transcript]);
+    prevTranscriptRef.current = transcript;
+  }, [transcript, isListening]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = content.trim();
@@ -54,6 +65,7 @@ export function ChatInput({
       onSend(trimmed);
       setContent('');
       resetTranscript();
+      prevTranscriptRef.current = '';
       stopListening();
       // Reset textarea height
       if (textareaRef.current) {

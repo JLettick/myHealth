@@ -3,7 +3,7 @@
  * Supports searching local foods and USDA FoodData Central database.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { Food, MealType, FoodEntryCreate, USDAFoodItem } from '../../types/nutrition';
 import { searchFoods, searchUSDAFoods, importUSDAFood } from '../../api/nutrition';
 import { useNutrition } from '../../contexts/NutritionContext';
@@ -41,26 +41,35 @@ export function AddFoodModal({ isOpen, mealType, onClose }: AddFoodModalProps) {
   const [isAdding, setIsAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Track search request identity to discard stale responses
+  const searchIdRef = useRef(0);
+
   const handleSearch = useCallback(async () => {
     if (query.length < 2) return;
 
+    const currentSearchId = ++searchIdRef.current;
     setIsSearching(true);
     setError(null);
     try {
       if (searchSource === 'local') {
         const response = await searchFoods(query);
+        if (searchIdRef.current !== currentSearchId) return;
         setLocalResults(response.results);
         setUsdaResults([]);
       } else {
         const response = await searchUSDAFoods(query, 1, 20, dataType);
+        if (searchIdRef.current !== currentSearchId) return;
         setUsdaResults(response.results);
         setLocalResults([]);
       }
     } catch (err) {
+      if (searchIdRef.current !== currentSearchId) return;
       console.error('Search failed:', err);
       setError('Search failed. Please try again.');
     } finally {
-      setIsSearching(false);
+      if (searchIdRef.current === currentSearchId) {
+        setIsSearching(false);
+      }
     }
   }, [query, searchSource, dataType]);
 

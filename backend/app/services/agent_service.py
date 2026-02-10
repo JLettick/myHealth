@@ -22,6 +22,7 @@ from app.services.agent_tools import (
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_ITERATIONS = 25
+MAX_CONVERSATION_HISTORY = 50
 
 SYSTEM_PROMPT = """You are a helpful health and fitness assistant for the myHealth app.
 You can read and write the user's health data using the tools provided.
@@ -118,6 +119,14 @@ class AgentService:
             {"role": msg["role"], "content": [{"text": msg["content"]}]}
             for msg in history
         ]
+
+        # Sliding window: keep only the most recent messages to avoid
+        # quadratic token cost growth and context window overflow
+        if len(messages) > MAX_CONVERSATION_HISTORY:
+            messages = messages[-MAX_CONVERSATION_HISTORY:]
+            # Bedrock Converse API requires the first message to be role "user"
+            if messages and messages[0]["role"] == "assistant":
+                messages = messages[1:]
 
         # Build system prompt
         system_prompt = SYSTEM_PROMPT.format(today=date.today().isoformat())

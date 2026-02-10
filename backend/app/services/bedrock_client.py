@@ -5,6 +5,7 @@ Provides a wrapper around boto3 Bedrock Runtime client for
 invoking Claude models with conversation history and tool use.
 """
 
+import asyncio
 import logging
 from typing import Optional, Dict, Any, List
 
@@ -118,7 +119,15 @@ class BedrockClient:
             if tools:
                 kwargs["toolConfig"] = {"tools": tools}
 
-            response = self.client.converse(**kwargs)
+            try:
+                response = await asyncio.to_thread(self.client.converse, **kwargs)
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "ThrottlingException":
+                    logger.warning("Bedrock throttled, retrying in 1s...")
+                    await asyncio.sleep(1)
+                    response = await asyncio.to_thread(self.client.converse, **kwargs)
+                else:
+                    raise
 
             return {
                 "output": response["output"]["message"],

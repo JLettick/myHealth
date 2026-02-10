@@ -11,6 +11,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   ReactNode,
 } from 'react';
 
@@ -114,11 +115,15 @@ export function GarminProvider({ children }: GarminProviderProps): JSX.Element {
   }, [loadData]);
 
   /**
-   * Load data on mount and when auth state changes.
+   * Clear state on logout.
    */
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (!isAuthenticated) {
+      setConnectionStatus(null);
+      setDashboardSummary(null);
+      setError(null);
+    }
+  }, [isAuthenticated]);
 
   /**
    * Initiate Garmin OAuth connection.
@@ -193,19 +198,34 @@ export function GarminProvider({ children }: GarminProviderProps): JSX.Element {
     setError(null);
   }, []);
 
-  const value: GarminContextValue = {
-    connectionStatus,
-    isConnected,
-    dashboardSummary,
-    isLoading,
-    isSyncing,
-    error,
-    connect,
-    disconnect,
-    sync,
-    refresh,
-    clearError,
-  };
+  const value = useMemo<GarminContextValue>(
+    () => ({
+      connectionStatus,
+      isConnected,
+      dashboardSummary,
+      isLoading,
+      isSyncing,
+      error,
+      connect,
+      disconnect,
+      sync,
+      refresh,
+      clearError,
+    }),
+    [
+      connectionStatus,
+      isConnected,
+      dashboardSummary,
+      isLoading,
+      isSyncing,
+      error,
+      connect,
+      disconnect,
+      sync,
+      refresh,
+      clearError,
+    ]
+  );
 
   return (
     <GarminContext.Provider value={value}>{children}</GarminContext.Provider>

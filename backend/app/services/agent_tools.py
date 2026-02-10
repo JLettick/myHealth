@@ -463,9 +463,16 @@ async def _log_workout(user_id: str, tool_input: Dict[str, Any]) -> Dict[str, An
             if "distance_meters" in set_data:
                 set_record["distance_meters"] = Decimal(str(set_data["distance_meters"]))
 
-        result = await service.create_set(user_id, session_id, set_record)
+        result = await service.create_set(
+            user_id, session_id, set_record, skip_ownership_check=True
+        )
         if result:
             created_sets.append(result)
+
+    # Clean up orphaned session if no sets were created
+    if not created_sets:
+        await service.delete_session(session_id, user_id)
+        return {"error": "Failed to create any workout sets. Session was not saved."}
 
     return _serialize({
         "session": session,

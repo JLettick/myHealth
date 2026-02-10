@@ -2,7 +2,8 @@
  * Nutrition tracking page component (protected).
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { useNutrition } from '../contexts/NutritionContext';
 import type { MealType, MealSummary } from '../types/nutrition';
 import {
@@ -13,8 +14,19 @@ import {
 } from '../components/nutrition';
 
 export function NutritionPage(): JSX.Element {
-  const { dailySummary, selectedDate, setSelectedDate, isLoading, error } =
+  const { isAuthenticated } = useAuth();
+  const { dailySummary, selectedDate, setSelectedDate, isLoading, error, refresh, refreshGoals } =
     useNutrition();
+
+  // Load nutrition data and goals on mount
+  const hasLoadedRef = useRef(false);
+  useEffect(() => {
+    if (isAuthenticated && !hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      refresh();
+      refreshGoals();
+    }
+  }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [addFoodModal, setAddFoodModal] = useState<{
     isOpen: boolean;

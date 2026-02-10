@@ -2,7 +2,7 @@
  * Whoop Context for managing Whoop connection and data state.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import type {
   WhoopConnectionStatus,
   WhoopDashboardSummary,
@@ -77,23 +77,19 @@ export function WhoopProvider({ children }: WhoopProviderProps) {
     setError(null);
 
     try {
-      console.log('[WhoopContext] Starting refresh...');
       logger.debug('Refreshing Whoop data');
 
       // Fetch status and dashboard in parallel
       const [status, dashboard] = await Promise.all([
         getWhoopStatus().catch(err => {
-          console.error('[WhoopContext] getWhoopStatus failed:', err);
+          logger.error('[WhoopContext] getWhoopStatus failed', { error: err });
           throw err;
         }),
         getWhoopDashboard().catch(err => {
-          console.error('[WhoopContext] getWhoopDashboard failed:', err);
+          logger.error('[WhoopContext] getWhoopDashboard failed', { error: err });
           throw err;
         }),
       ]);
-
-      console.log('[WhoopContext] Status:', status);
-      console.log('[WhoopContext] Dashboard:', dashboard);
 
       setConnectionStatus(status);
       setDashboardSummary(dashboard);
@@ -101,7 +97,6 @@ export function WhoopProvider({ children }: WhoopProviderProps) {
       logger.info('Whoop data refreshed', { isConnected: status.is_connected });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load Whoop data';
-      console.error('[WhoopContext] Refresh failed:', err);
       logger.error('Failed to refresh Whoop data', { error: message });
       setError(message);
     } finally {
@@ -188,16 +183,14 @@ export function WhoopProvider({ children }: WhoopProviderProps) {
     [isConnected, refresh]
   );
 
-  // Load data on mount and when auth changes
+  // Clear state on logout
   useEffect(() => {
-    if (isAuthenticated) {
-      refresh();
-    } else {
+    if (!isAuthenticated) {
       setConnectionStatus(null);
       setDashboardSummary(null);
       setError(null);
     }
-  }, [isAuthenticated, refresh]);
+  }, [isAuthenticated]);
 
   // Check for OAuth callback result in URL
   useEffect(() => {
@@ -205,39 +198,46 @@ export function WhoopProvider({ children }: WhoopProviderProps) {
     const whoopConnected = params.get('whoop_connected');
     const whoopError = params.get('whoop_error');
 
-    console.log('[WhoopContext] URL params check:', {
-      whoopConnected,
-      whoopError,
-      fullSearch: window.location.search
-    });
-
     if (whoopConnected === 'true') {
-      console.log('[WhoopContext] Success! Refreshing data...');
       logger.info('Whoop connected via OAuth callback');
       // Clear URL params and refresh
       window.history.replaceState({}, '', window.location.pathname);
       refresh();
     } else if (whoopError) {
-      console.error('[WhoopContext] OAuth error:', whoopError);
       logger.error('Whoop OAuth error', { error: whoopError });
       setError(`Whoop connection failed: ${whoopError}`);
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, [refresh]);
 
-  const value: WhoopContextValue = {
-    connectionStatus,
-    isConnected,
-    dashboardSummary,
-    isLoading,
-    isSyncing,
-    error,
-    connect,
-    disconnect,
-    sync,
-    refresh,
-    clearError,
-  };
+  const value = useMemo<WhoopContextValue>(
+    () => ({
+      connectionStatus,
+      isConnected,
+      dashboardSummary,
+      isLoading,
+      isSyncing,
+      error,
+      connect,
+      disconnect,
+      sync,
+      refresh,
+      clearError,
+    }),
+    [
+      connectionStatus,
+      isConnected,
+      dashboardSummary,
+      isLoading,
+      isSyncing,
+      error,
+      connect,
+      disconnect,
+      sync,
+      refresh,
+      clearError,
+    ]
+  );
 
   return <WhoopContext.Provider value={value}>{children}</WhoopContext.Provider>;
 }

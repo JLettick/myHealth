@@ -2,6 +2,8 @@
  * AI Agent page with chat interface.
  */
 
+import { useEffect, useRef } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { useAgent } from '../contexts/AgentContext';
 import { ChatWindow } from '../components/agent';
 
@@ -9,6 +11,7 @@ import { ChatWindow } from '../components/agent';
  * Full-page chat interface with conversation sidebar.
  */
 export function AgentPage(): JSX.Element {
+  const { isAuthenticated } = useAuth();
   const {
     conversations,
     conversationId,
@@ -16,7 +19,17 @@ export function AgentPage(): JSX.Element {
     loadConversation,
     newConversation,
     deleteConversation,
+    refreshConversations,
   } = useAgent();
+
+  // Load conversations on mount
+  const hasLoadedRef = useRef(false);
+  useEffect(() => {
+    if (isAuthenticated && !hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      refreshConversations();
+    }
+  }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex h-[calc(100vh-120px)] gap-4">

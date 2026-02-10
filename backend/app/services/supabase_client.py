@@ -170,15 +170,15 @@ class SupabaseService:
         logger.info("Attempting to sign out user")
 
         try:
-            # Set the session before signing out
-            self.client.auth.set_session(access_token, "")
-            self.client.auth.sign_out()
+            # Use admin client to sign out — avoids mutating shared anon client session state
+            self.admin_client.auth.admin.sign_out(access_token)
             logger.info("Sign out successful")
             return True
 
         except Exception as e:
-            logger.error(f"Sign out failed: {e}")
-            raise
+            # Token will expire naturally; frontend already clears tokens
+            logger.warning(f"Sign out via admin failed (token will expire naturally): {e}")
+            return True
 
     async def refresh_session(self, refresh_token: str) -> dict[str, Any]:
         """

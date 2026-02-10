@@ -28,20 +28,34 @@ const apiClient = axios.create({
 
 // Flag to prevent multiple simultaneous refresh attempts
 let isRefreshing = false;
-let refreshSubscribers: ((token: string) => void)[] = [];
+let refreshSubscribers: {
+  resolve: (token: string) => void;
+  reject: (error: unknown) => void;
+}[] = [];
 
 /**
  * Subscribe to token refresh completion.
+ * Returns a promise that resolves with the new token or rejects on failure.
  */
-function subscribeTokenRefresh(callback: (token: string) => void): void {
-  refreshSubscribers.push(callback);
+function subscribeTokenRefresh(): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    refreshSubscribers.push({ resolve, reject });
+  });
 }
 
 /**
  * Notify all subscribers that token refresh is complete.
  */
 function onTokenRefreshed(token: string): void {
-  refreshSubscribers.forEach((callback) => callback(token));
+  refreshSubscribers.forEach((subscriber) => subscriber.resolve(token));
+  refreshSubscribers = [];
+}
+
+/**
+ * Reject all subscribers when token refresh fails.
+ */
+function onTokenRefreshFailed(error: unknown): void {
+  refreshSubscribers.forEach((subscriber) => subscriber.reject(error));
   refreshSubscribers = [];
 }
 
@@ -98,14 +112,11 @@ apiClient.interceptors.response.use(
 
       if (isRefreshing) {
         // Wait for the ongoing refresh to complete
-        return new Promise((resolve) => {
-          subscribeTokenRefresh((token: string) => {
-            if (originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${token}`;
-            }
-            resolve(apiClient(originalRequest));
-          });
-        });
+        const token = await subscribeTokenRefresh();
+        if (originalRequest.headers) {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+        }
+        return apiClient(originalRequest);
       }
 
       isRefreshing = true;
@@ -140,6 +151,9 @@ apiClient.interceptors.response.use(
         logger.error('Token refresh failed', {
           error: refreshError instanceof Error ? refreshError.message : 'Unknown error',
         });
+
+        // Reject all pending subscribers before clearing tokens
+        onTokenRefreshFailed(refreshError);
 
         // Refresh failed, clear tokens and redirect to login
         tokenStorage.clearTokens();

@@ -5,7 +5,7 @@
  * with a dropdown selector to switch between sources.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useWhoop } from '../contexts/WhoopContext';
 import { useGarmin } from '../contexts/GarminContext';
@@ -31,15 +31,25 @@ const STORAGE_KEY = 'fitness_source';
  * Protected dashboard page for authenticated users.
  */
 export function DashboardPage(): JSX.Element {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const {
     isConnected: whoopConnected,
     dashboardSummary: whoopData,
+    refresh: refreshWhoop,
   } = useWhoop();
   const {
     isConnected: garminConnected,
     dashboardSummary: garminData,
   } = useGarmin();
+
+  // Load Whoop data on mount
+  const hasLoadedRef = useRef(false);
+  useEffect(() => {
+    if (isAuthenticated && !hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      refreshWhoop();
+    }
+  }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initialize selected source from localStorage or default to whoop
   // Note: Garmin is currently disabled, so always default to whoop
