@@ -11,7 +11,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -19,7 +19,12 @@ logger = get_logger(__name__)
 
 def _get_client_ip(request: Request) -> str:
     """
-    Extract client IP from request, respecting X-Forwarded-For.
+    Extract client IP from request.
+
+    Uses trusted_proxy_count to determine whether to trust X-Forwarded-For.
+    When trusted_proxy_count is 0 (direct connection), X-Forwarded-For is
+    ignored to prevent IP spoofing. When > 0, the IP at position
+    -(trusted_proxy_count) in the X-Forwarded-For chain is used.
 
     Args:
         request: The incoming FastAPI request
@@ -27,10 +32,19 @@ def _get_client_ip(request: Request) -> str:
     Returns:
         Client IP address string
     """
+    settings = get_settings()
+
+    if settings.trusted_proxy_count == 0:
+        return request.client.host if request.client else "unknown"
+
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
-        # First IP in the chain is the original client
-        return forwarded_for.split(",")[0].strip()
+        ips = [ip.strip() for ip in forwarded_for.split(",")]
+        try:
+            return ips[-settings.trusted_proxy_count]
+        except IndexError:
+            return ips[0]
+
     return request.client.host if request.client else "unknown"
 
 

@@ -21,6 +21,7 @@ from app.core.logging_config import get_logger, setup_logging
 from app.middleware.cors import setup_cors
 from app.middleware.logging_middleware import setup_logging_middleware
 from app.middleware.rate_limit import setup_rate_limiting
+from app.middleware.security_headers import setup_security_headers
 
 # Get settings
 settings = get_settings()
@@ -70,6 +71,7 @@ app = FastAPI(
 # Setup middleware (order matters - last added is executed first)
 setup_logging_middleware(app)
 setup_cors(app, settings)
+setup_security_headers(app, settings)
 setup_rate_limiting(app, settings)
 
 # Register exception handlers

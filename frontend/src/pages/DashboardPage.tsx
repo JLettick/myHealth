@@ -1,14 +1,13 @@
 /**
  * Dashboard page component (protected).
  *
- * Displays fitness data from the selected source (Whoop or Garmin)
+ * Displays fitness data from the selected source (Whoop)
  * with a dropdown selector to switch between sources.
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useWhoop } from '../contexts/WhoopContext';
-import { useGarmin } from '../contexts/GarminContext';
 import { FitnessSourceSelector } from '../components/fitness';
 import type { FitnessSource } from '../components/fitness';
 import {
@@ -17,14 +16,6 @@ import {
   WhoopSleepCard,
   WhoopStrainCard,
 } from '../components/whoop';
-import {
-  GarminConnectionCard,
-  GarminDailyCard,
-  GarminHeartRateCard,
-  GarminSleepCard,
-  GarminActivityCard,
-} from '../components/garmin';
-
 const STORAGE_KEY = 'fitness_source';
 
 /**
@@ -37,11 +28,6 @@ export function DashboardPage(): JSX.Element {
     dashboardSummary: whoopData,
     refresh: refreshWhoop,
   } = useWhoop();
-  const {
-    isConnected: garminConnected,
-    dashboardSummary: garminData,
-  } = useGarmin();
-
   // Load Whoop data on mount
   const hasLoadedRef = useRef(false);
   useEffect(() => {
@@ -176,38 +162,6 @@ export function DashboardPage(): JSX.Element {
     </>
   );
 
-  /**
-   * Render the dashboard for Garmin source.
-   */
-  const renderGarminDashboard = () => (
-    <>
-      {/* Garmin Connection Card */}
-      <div className="mb-8">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">
-          Garmin Connection
-        </h2>
-        <div className="max-w-md">
-          <GarminConnectionCard />
-        </div>
-      </div>
-
-      {/* Garmin Metrics - Only show if connected */}
-      {garminConnected && (
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">
-            Garmin Metrics
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <GarminDailyCard />
-            <GarminHeartRateCard />
-            <GarminSleepCard />
-            <GarminActivityCard />
-          </div>
-        </div>
-      )}
-    </>
-  );
-
   return (
     <div>
       {/* Welcome Header */}
@@ -225,11 +179,10 @@ export function DashboardPage(): JSX.Element {
         selectedSource={selectedSource}
         onSourceChange={setSelectedSource}
         whoopConnected={whoopConnected}
-        garminConnected={garminConnected}
       />
 
       {/* Source-specific Dashboard */}
-      {selectedSource === 'whoop' ? renderWhoopDashboard() : renderGarminDashboard()}
+      {renderWhoopDashboard()}
     </div>
   );
 }

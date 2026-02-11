@@ -1,14 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useWhoop } from '../contexts/WhoopContext';
-import { useGarmin } from '../contexts/GarminContext';
 import { getProfile, updateProfile } from '../api/users';
 import type { UserProfile } from '../api/users';
 
 export function AccountPage(): JSX.Element {
   const { user, isAuthenticated } = useAuth();
   const { isConnected: whoopConnected, refresh: refreshWhoop } = useWhoop();
-  const { isConnected: garminConnected, refresh: refreshGarmin } = useGarmin();
 
   // Load connection statuses on mount
   const hasLoadedRef = useRef(false);
@@ -16,7 +14,6 @@ export function AccountPage(): JSX.Element {
     if (isAuthenticated && !hasLoadedRef.current) {
       hasLoadedRef.current = true;
       refreshWhoop();
-      refreshGarmin();
     }
   }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -145,18 +142,6 @@ export function AccountPage(): JSX.Element {
               }`}
             >
               {whoopConnected ? 'Connected' : 'Not Connected'}
-            </span>
-          </div>
-          <div className="flex items-center justify-between py-2">
-            <span className="text-gray-700 font-medium">Garmin</span>
-            <span
-              className={`text-sm font-medium px-2.5 py-0.5 rounded-full ${
-                garminConnected
-                  ? 'bg-green-100 text-green-700'
-                  : 'bg-gray-100 text-gray-500'
-              }`}
-            >
-              {garminConnected ? 'Connected' : 'Not Connected'}
             </span>
           </div>
         </div>
