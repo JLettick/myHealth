@@ -36,11 +36,10 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
+settings = get_settings()
+
 # In-memory state storage (use Redis in production)
 _oauth_states: dict[str, str] = {}
-
-# Frontend URL for redirects after OAuth
-FRONTEND_URL = "http://localhost:5173"
 
 
 @router.get(
@@ -93,7 +92,7 @@ async def oauth_callback(
     if not user_id:
         logger.warning(f"Invalid or expired OAuth state. Received: {state[:8]}..., stored states count: {len(_oauth_states)}")
         return RedirectResponse(
-            url=f"{FRONTEND_URL}/dashboard?whoop_error=invalid_state",
+            url=f"{settings.frontend_url}/dashboard?whoop_error=invalid_state",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -128,20 +127,20 @@ async def oauth_callback(
 
         # Redirect to dashboard with success message
         return RedirectResponse(
-            url=f"{FRONTEND_URL}/dashboard?whoop_connected=true",
+            url=f"{settings.frontend_url}/dashboard?whoop_connected=true",
             status_code=status.HTTP_302_FOUND,
         )
 
     except WhoopAuthError as e:
         logger.error(f"Whoop OAuth failed: {e.message}")
         return RedirectResponse(
-            url=f"{FRONTEND_URL}/dashboard?whoop_error={e.error_code}",
+            url=f"{settings.frontend_url}/dashboard?whoop_error={e.error_code}",
             status_code=status.HTTP_302_FOUND,
         )
     except Exception as e:
         logger.exception(f"Unexpected error in Whoop callback: {e}")
         return RedirectResponse(
-            url=f"{FRONTEND_URL}/dashboard?whoop_error=unexpected_error",
+            url=f"{settings.frontend_url}/dashboard?whoop_error=unexpected_error",
             status_code=status.HTTP_302_FOUND,
         )
 

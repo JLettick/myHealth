@@ -7,7 +7,7 @@ that has context about the user's health data.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.dependencies import get_current_user
 from app.schemas.auth import UserResponse
@@ -18,6 +18,7 @@ from app.schemas.agent import (
     ConversationDetail,
     ConversationListResponse,
 )
+from app.middleware.rate_limit import limiter
 from app.services.agent_service import get_agent_service, AgentService
 from app.services.bedrock_client import BedrockAPIError
 
@@ -32,8 +33,10 @@ def get_service() -> AgentService:
 
 
 @router.post("/chat", response_model=ChatResponse)
+@limiter.limit("10/minute")
 async def send_chat_message(
-    request: ChatMessageCreate,
+    request: Request,
+    chat_request: ChatMessageCreate,
     current_user: UserResponse = Depends(get_current_user),
     agent_service: AgentService = Depends(get_service),
 ):
@@ -46,8 +49,8 @@ async def send_chat_message(
     try:
         result = await agent_service.send_message(
             user_id=str(current_user.id),
-            content=request.content,
-            conversation_id=request.conversation_id,
+            content=chat_request.content,
+            conversation_id=chat_request.conversation_id,
         )
         return ChatResponse(
             message=result["message"],

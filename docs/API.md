@@ -9,6 +9,17 @@ All protected endpoints require a Bearer token in the Authorization header:
 Authorization: Bearer <access_token>
 ```
 
+### Refresh Token (httpOnly Cookie)
+
+Refresh tokens are **not** returned in JSON response bodies. Instead, they are set as `httpOnly` cookies by the backend on login, signup, and refresh. The cookie is:
+- `HttpOnly` (not accessible from JavaScript)
+- `SameSite=Lax` (CSRF protection)
+- `Secure` in production only
+- `Path=/api/v1/auth` (only sent to auth endpoints)
+- `Max-Age=2592000` (30 days)
+
+The access token is returned in the JSON body and should be stored in memory only.
+
 ---
 
 ## Endpoints
@@ -52,6 +63,9 @@ Create a new user account.
 - At least one special character
 
 **Response**: `200 OK`
+
+The refresh token is set as an httpOnly cookie (not in the JSON body).
+
 ```json
 {
   "user": {
@@ -64,7 +78,7 @@ Create a new user account.
   },
   "session": {
     "access_token": "eyJhbG...",
-    "refresh_token": "eyJhbG...",
+    "refresh_token": null,
     "token_type": "Bearer",
     "expires_in": 3600,
     "expires_at": "2024-01-15T11:00:00Z"
@@ -91,6 +105,9 @@ Authenticate with email and password.
 ```
 
 **Response**: `200 OK`
+
+The refresh token is set as an httpOnly cookie (not in the JSON body).
+
 ```json
 {
   "user": {
@@ -103,7 +120,7 @@ Authenticate with email and password.
   },
   "session": {
     "access_token": "eyJhbG...",
-    "refresh_token": "eyJhbG...",
+    "refresh_token": null,
     "token_type": "Bearer",
     "expires_in": 3600,
     "expires_at": "2024-01-15T11:00:00Z"
@@ -118,7 +135,7 @@ Authenticate with email and password.
 ---
 
 #### POST /auth/logout
-Sign out and invalidate session.
+Sign out and invalidate session. Clears the refresh token httpOnly cookie.
 
 **Headers**: `Authorization: Bearer <token>` (required)
 
@@ -135,7 +152,9 @@ Sign out and invalidate session.
 #### POST /auth/refresh
 Refresh access token using refresh token.
 
-**Request Body**:
+The refresh token is read from the httpOnly cookie (preferred) or from the request body (backward compatibility).
+
+**Request Body** (optional — cookie is preferred):
 ```json
 {
   "refresh_token": "eyJhbG..."
@@ -143,12 +162,15 @@ Refresh access token using refresh token.
 ```
 
 **Response**: `200 OK`
+
+A new refresh token is set as an httpOnly cookie. The JSON body contains `refresh_token: null`.
+
 ```json
 {
   "user": { ... },
   "session": {
     "access_token": "new_token...",
-    "refresh_token": "new_refresh...",
+    "refresh_token": null,
     ...
   },
   "message": "Token refreshed successfully"
@@ -156,7 +178,7 @@ Refresh access token using refresh token.
 ```
 
 **Errors**:
-- `401 Unauthorized`: Invalid or expired refresh token
+- `401 Unauthorized`: Invalid or expired refresh token, or no refresh token provided
 
 ---
 
@@ -830,11 +852,27 @@ All errors follow this format:
 
 ## Rate Limits
 
+Rate limiting is implemented via slowapi, keyed by client IP (with `X-Forwarded-For` support).
+Can be disabled via `rate_limit_enabled=False` in backend config.
+
 | Endpoint | Limit |
 |----------|-------|
-| POST /auth/login | 5 requests/minute |
-| POST /auth/signup | 3 requests/hour |
-| Other endpoints | 100 requests/minute |
+| POST /auth/signup | 5/minute |
+| POST /auth/login | 10/minute |
+| POST /auth/refresh | 30/minute |
+| POST /auth/logout | 30/minute |
+| GET /auth/me | 30/minute |
+| POST /agent/chat | 10/minute |
+
+When a rate limit is exceeded, a `429 Too Many Requests` response is returned with a `Retry-After` header:
+```json
+{
+  "error": "RATE_LIMIT_EXCEEDED",
+  "message": "Too many requests. Please try again later.",
+  "details": { "limit": "10 per 1 minute" },
+  "request_id": "abc123"
+}
+```
 
 ---
 

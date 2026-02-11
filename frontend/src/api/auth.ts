@@ -42,13 +42,11 @@ export async function logout(): Promise<MessageResponse> {
 }
 
 /**
- * Refresh access token using refresh token.
+ * Refresh access token using refresh token cookie (sent automatically).
  */
-export async function refreshToken(refreshToken: string): Promise<AuthResponse> {
+export async function refreshToken(): Promise<AuthResponse> {
   logger.info('Refreshing token');
-  const response = await apiClient.post<AuthResponse>('/auth/refresh', {
-    refresh_token: refreshToken,
-  });
+  const response = await apiClient.post<AuthResponse>('/auth/refresh', {});
   return response.data;
 }
 

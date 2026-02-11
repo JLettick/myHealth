@@ -2,12 +2,12 @@
  * Dropdown selector for fitness data source.
  *
  * Allows users to switch between different fitness data providers
- * (Whoop, Garmin, etc.) on the dashboard.
+ * (Whoop, etc.) on the dashboard.
  */
 
 import React from 'react';
 
-export type FitnessSource = 'whoop' | 'garmin';
+export type FitnessSource = 'whoop';
 
 interface FitnessSourceSelectorProps {
   /** Currently selected source */
@@ -16,8 +16,6 @@ interface FitnessSourceSelectorProps {
   onSourceChange: (source: FitnessSource) => void;
   /** Whether Whoop is connected */
   whoopConnected: boolean;
-  /** Whether Garmin is connected */
-  garminConnected: boolean;
 }
 
 interface SourceOption {
@@ -29,7 +27,6 @@ interface SourceOption {
 
 const sourceOptions: SourceOption[] = [
   { id: 'whoop', name: 'Whoop', icon: '💪', enabled: true },
-  { id: 'garmin', name: 'Garmin', icon: '⌚', enabled: false }, // Disabled - API not public
 ];
 
 /**
@@ -39,14 +36,11 @@ export function FitnessSourceSelector({
   selectedSource,
   onSourceChange,
   whoopConnected,
-  garminConnected,
 }: FitnessSourceSelectorProps): JSX.Element {
   const getConnectionStatus = (source: FitnessSource): boolean => {
     switch (source) {
       case 'whoop':
         return whoopConnected;
-      case 'garmin':
-        return garminConnected;
       default:
         return false;
     }

@@ -1,11 +1,20 @@
 """
 Authentication endpoints for user signup, login, logout, and token refresh.
+
+Refresh tokens are sent as httpOnly cookies for XSS protection.
+Access tokens are returned in the JSON body (stored in memory by the frontend).
 """
 
-from fastapi import APIRouter, Depends, Request
+from typing import Optional
 
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
+
+from app.config import get_settings
+from app.core.exceptions import AuthenticationError
 from app.core.logging_config import get_logger
 from app.dependencies import get_access_token, get_current_user
+from app.middleware.rate_limit import limiter
 from app.schemas.auth import (
     AuthResponse,
     LoginRequest,
@@ -20,6 +29,56 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
+# Cookie settings
+_COOKIE_KEY = "refresh_token"
+_COOKIE_PATH = "/api/v1/auth"
+_COOKIE_MAX_AGE = 30 * 24 * 60 * 60  # 30 days
+
+
+def _set_refresh_cookie(response: JSONResponse, token: str) -> None:
+    """Set the refresh token as an httpOnly cookie on the response."""
+    settings = get_settings()
+    response.set_cookie(
+        key=_COOKIE_KEY,
+        value=token,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        path=_COOKIE_PATH,
+        max_age=_COOKIE_MAX_AGE,
+    )
+
+
+def _clear_refresh_cookie(response: JSONResponse) -> None:
+    """Clear the refresh token cookie on the response."""
+    settings = get_settings()
+    response.delete_cookie(
+        key=_COOKIE_KEY,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        path=_COOKIE_PATH,
+    )
+
+
+def _auth_response_with_cookie(result: AuthResponse) -> JSONResponse:
+    """
+    Build a JSONResponse from an AuthResponse, moving the refresh token
+    from the JSON body into an httpOnly cookie.
+    """
+    # Extract refresh token before nulling it in the body
+    refresh_token = result.session.refresh_token
+
+    # Null the refresh token in the response body
+    result.session.refresh_token = None
+
+    response = JSONResponse(content=result.model_dump(mode="json"))
+
+    if refresh_token:
+        _set_refresh_cookie(response, refresh_token)
+
+    return response
+
 
 @router.post(
     "/signup",
@@ -32,29 +91,18 @@ router = APIRouter()
         422: {"description": "Validation error (invalid email or weak password)"},
     },
 )
+@limiter.limit("5/minute")
 async def signup(
     request: Request,
     data: SignupRequest,
     auth_service: AuthService = Depends(get_auth_service),
-) -> AuthResponse:
+):
     """
     Register a new user account.
 
     Creates a new user in Supabase Auth with the provided email and password.
-    Password must meet complexity requirements:
-    - At least 8 characters
-    - At least one uppercase letter
-    - At least one lowercase letter
-    - At least one digit
-    - At least one special character
-
-    Args:
-        request: FastAPI request object
-        data: Signup request data
-        auth_service: Auth service instance
-
-    Returns:
-        AuthResponse with user data and session tokens
+    The refresh token is set as an httpOnly cookie; the access token is
+    returned in the JSON response body.
     """
     request_id = getattr(request.state, "request_id", None)
 
@@ -74,7 +122,7 @@ async def signup(
         extra={"request_id": request_id, "user_id": result.user.id},
     )
 
-    return result
+    return _auth_response_with_cookie(result)
 
 
 @router.post(
@@ -87,24 +135,17 @@ async def signup(
         401: {"description": "Invalid credentials"},
     },
 )
+@limiter.limit("10/minute")
 async def login(
     request: Request,
     data: LoginRequest,
     auth_service: AuthService = Depends(get_auth_service),
-) -> AuthResponse:
+):
     """
     Authenticate a user with email and password.
 
-    Validates credentials against Supabase Auth and returns
-    session tokens for authenticated API requests.
-
-    Args:
-        request: FastAPI request object
-        data: Login request data
-        auth_service: Auth service instance
-
-    Returns:
-        AuthResponse with user data and session tokens
+    The refresh token is set as an httpOnly cookie; the access token is
+    returned in the JSON response body.
     """
     request_id = getattr(request.state, "request_id", None)
 
@@ -123,7 +164,7 @@ async def login(
         extra={"request_id": request_id, "user_id": result.user.id},
     )
 
-    return result
+    return _auth_response_with_cookie(result)
 
 
 @router.post(
@@ -136,24 +177,16 @@ async def login(
         401: {"description": "Not authenticated"},
     },
 )
+@limiter.limit("30/minute")
 async def logout(
     request: Request,
     access_token: str = Depends(get_access_token),
     auth_service: AuthService = Depends(get_auth_service),
-) -> MessageResponse:
+):
     """
     Sign out the current user.
 
-    Invalidates the current session in Supabase Auth.
-    The client should discard their stored tokens after this call.
-
-    Args:
-        request: FastAPI request object
-        access_token: Current access token
-        auth_service: Auth service instance
-
-    Returns:
-        MessageResponse confirming logout
+    Invalidates the current session and clears the refresh token cookie.
     """
     request_id = getattr(request.state, "request_id", None)
 
@@ -169,7 +202,9 @@ async def logout(
         extra={"request_id": request_id},
     )
 
-    return result
+    response = JSONResponse(content=result.model_dump(mode="json"))
+    _clear_refresh_cookie(response)
+    return response
 
 
 @router.post(
@@ -182,24 +217,17 @@ async def logout(
         401: {"description": "Invalid or expired refresh token"},
     },
 )
+@limiter.limit("30/minute")
 async def refresh_token(
     request: Request,
-    data: RefreshTokenRequest,
+    data: Optional[RefreshTokenRequest] = None,
     auth_service: AuthService = Depends(get_auth_service),
-) -> AuthResponse:
+):
     """
     Refresh the access token using a refresh token.
 
-    When the access token expires, use this endpoint to get
-    a new access token without requiring the user to log in again.
-
-    Args:
-        request: FastAPI request object
-        data: Refresh token request data
-        auth_service: Auth service instance
-
-    Returns:
-        AuthResponse with new session tokens
+    Reads the refresh token from the httpOnly cookie first,
+    falls back to the request body for backward compatibility.
     """
     request_id = getattr(request.state, "request_id", None)
 
@@ -208,14 +236,22 @@ async def refresh_token(
         extra={"request_id": request_id},
     )
 
-    result = await auth_service.refresh_token(data.refresh_token)
+    # Prefer cookie, fall back to request body
+    token = request.cookies.get(_COOKIE_KEY)
+    if not token and data:
+        token = data.refresh_token
+
+    if not token:
+        raise AuthenticationError(message="No refresh token provided")
+
+    result = await auth_service.refresh_token(token)
 
     logger.info(
         "Token refresh successful",
         extra={"request_id": request_id},
     )
 
-    return result
+    return _auth_response_with_cookie(result)
 
 
 @router.get(
@@ -228,6 +264,7 @@ async def refresh_token(
         401: {"description": "Not authenticated"},
     },
 )
+@limiter.limit("30/minute")
 async def get_me(
     request: Request,
     current_user: UserResponse = Depends(get_current_user),
@@ -236,13 +273,6 @@ async def get_me(
     Get the current authenticated user's information.
 
     Requires a valid access token in the Authorization header.
-
-    Args:
-        request: FastAPI request object
-        current_user: Current authenticated user
-
-    Returns:
-        UserResponse with user data
     """
     request_id = getattr(request.state, "request_id", None)
 

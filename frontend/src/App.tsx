@@ -5,7 +5,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { WhoopProvider } from './contexts/WhoopContext';
-import { GarminProvider } from './contexts/GarminContext';
 import { NutritionProvider } from './contexts/NutritionContext';
 import { AgentProvider } from './contexts/AgentContext';
 import { WorkoutProvider } from './contexts/WorkoutContext';
@@ -29,7 +28,6 @@ function App(): JSX.Element {
     <BrowserRouter>
       <AuthProvider>
         <WhoopProvider>
-          <GarminProvider>
             <NutritionProvider>
               <AgentProvider>
                 <WorkoutProvider>
@@ -89,7 +87,6 @@ function App(): JSX.Element {
                 </WorkoutProvider>
               </AgentProvider>
             </NutritionProvider>
-          </GarminProvider>
         </WhoopProvider>
       </AuthProvider>
     </BrowserRouter>
