@@ -320,6 +320,70 @@ class ExerciseListResponse(BaseModel):
     page_size: int = 20
 
 
+# =============================================================================
+# Analytics Schemas
+# =============================================================================
+
+
+class ExerciseHistoryDataPoint(BaseModel):
+    """Single data point for exercise progression chart."""
+
+    date: str = Field(..., description="ISO date string")
+    max_weight_kg: Optional[float] = None
+    total_volume_kg: Optional[float] = None
+    total_reps: int = 0
+    avg_rpe: Optional[float] = None
+    total_sets: int = 0
+
+
+class ExerciseHistoryResponse(BaseModel):
+    """Exercise history response for charts."""
+
+    exercise_id: str
+    exercise_name: str
+    data: list[ExerciseHistoryDataPoint] = Field(default_factory=list)
+
+
+class CardioHistoryDataPoint(BaseModel):
+    """Single data point for cardio performance chart."""
+
+    date: str = Field(..., description="ISO date string")
+    total_distance_meters: Optional[float] = None
+    total_duration_seconds: Optional[int] = None
+    avg_pace_seconds_per_km: Optional[int] = None
+    avg_heart_rate: Optional[int] = None
+    total_calories: Optional[int] = None
+    total_sets: int = 0
+
+
+class CardioHistoryResponse(BaseModel):
+    """Cardio history response for charts."""
+
+    exercise_id: str
+    exercise_name: str
+    data: list[CardioHistoryDataPoint] = Field(default_factory=list)
+
+
+class WeeklyTrendDataPoint(BaseModel):
+    """Single data point for weekly trends chart."""
+
+    week: str = Field(..., description="ISO week string (e.g. 2024-W05)")
+    week_start: str = Field(..., description="Monday date of the week")
+    total_sessions: int = 0
+    total_sets: int = 0
+    total_volume_kg: Optional[float] = None
+    total_distance_meters: Optional[float] = None
+    total_duration_minutes: Optional[float] = None
+
+
+class WorkoutTrendsResponse(BaseModel):
+    """Workout trends response for charts."""
+
+    data: list[WeeklyTrendDataPoint] = Field(default_factory=list)
+    workouts_per_week_target: Optional[int] = None
+    minutes_per_week_target: Optional[int] = None
+
+
 class ExerciseSearchResponse(BaseModel):
     """Search results for exercises."""
 

@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkout } from '../contexts/WorkoutContext';
 import type { WorkoutType } from '../types/workout';
@@ -49,11 +50,19 @@ export function WorkoutPage(): JSX.Element {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Workout Tracker</h1>
-        <p className="text-gray-600 mt-2">
-          Log your workouts and track your progress.
-        </p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Workout Tracker</h1>
+          <p className="text-gray-600 mt-2">
+            Log your workouts and track your progress.
+          </p>
+        </div>
+        <Link
+          to="/analytics"
+          className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+        >
+          View Analytics
+        </Link>
       </div>
 
       {error && (

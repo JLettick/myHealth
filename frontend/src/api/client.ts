@@ -101,6 +101,14 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
+      // Defense-in-depth: if the failing request was itself a refresh call,
+      // do NOT attempt another refresh (prevents recursive loop).
+      if (originalRequest.url?.includes('/auth/refresh')) {
+        tokenStorage.clearTokens();
+        window.location.href = '/login';
+        return Promise.reject(error);
+      }
+
       if (isRefreshing) {
         // Wait for the ongoing refresh to complete
         const token = await subscribeTokenRefresh();

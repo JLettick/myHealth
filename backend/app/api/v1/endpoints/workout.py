@@ -36,6 +36,12 @@ from app.schemas.workout import (
     WeeklyWorkoutSummary,
     WorkoutGoalsCreate,
     WorkoutGoalsResponse,
+    ExerciseHistoryDataPoint,
+    ExerciseHistoryResponse,
+    CardioHistoryDataPoint,
+    CardioHistoryResponse,
+    WeeklyTrendDataPoint,
+    WorkoutTrendsResponse,
 )
 from app.services.workout_service import get_workout_service
 
@@ -509,3 +515,122 @@ async def set_goals(
     result = await service.upsert_goals(current_user.id, goals.model_dump())
 
     return WorkoutGoalsResponse(**result)
+
+
+# =============================================================================
+# ANALYTICS ENDPOINTS
+# =============================================================================
+
+
+@router.get(
+    "/analytics/exercises",
+    response_model=ExerciseSearchResponse,
+    summary="Get logged exercises",
+    description="Get exercises the user has actually logged workouts for",
+)
+async def get_logged_exercises(
+    q: str = Query("", description="Search query"),
+    set_type: Optional[str] = Query(None, description="Filter by set type (strength/cardio)"),
+    current_user: UserResponse = Depends(get_current_user),
+) -> ExerciseSearchResponse:
+    """Get exercises the user has actually performed."""
+    service = get_workout_service()
+    results = await service.get_logged_exercises(current_user.id, set_type, q)
+
+    return ExerciseSearchResponse(
+        results=[ExerciseResponse(**r) for r in results],
+        total=len(results),
+        query=q,
+    )
+
+
+@router.get(
+    "/analytics/exercise/{exercise_id}",
+    response_model=ExerciseHistoryResponse,
+    summary="Get exercise history",
+    description="Get exercise performance history over a date range for charts",
+)
+async def get_exercise_history(
+    exercise_id: str,
+    start_date: date = Query(..., description="Start date"),
+    end_date: date = Query(..., description="End date"),
+    current_user: UserResponse = Depends(get_current_user),
+) -> ExerciseHistoryResponse:
+    """Get exercise performance history for progression charts."""
+    service = get_workout_service()
+
+    # Verify exercise exists and user has access
+    exercise = await service.get_exercise(exercise_id, current_user.id)
+    if not exercise:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found"
+        )
+
+    data = await service.get_exercise_history(
+        current_user.id, exercise_id, start_date, end_date
+    )
+
+    return ExerciseHistoryResponse(
+        exercise_id=exercise_id,
+        exercise_name=exercise["name"],
+        data=[ExerciseHistoryDataPoint(**d) for d in data],
+    )
+
+
+@router.get(
+    "/analytics/cardio/{exercise_id}",
+    response_model=CardioHistoryResponse,
+    summary="Get cardio history",
+    description="Get cardio exercise performance history over a date range",
+)
+async def get_cardio_history(
+    exercise_id: str,
+    start_date: date = Query(..., description="Start date"),
+    end_date: date = Query(..., description="End date"),
+    current_user: UserResponse = Depends(get_current_user),
+) -> CardioHistoryResponse:
+    """Get cardio exercise history for performance charts."""
+    service = get_workout_service()
+
+    # Verify exercise exists and user has access
+    exercise = await service.get_exercise(exercise_id, current_user.id)
+    if not exercise:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found"
+        )
+
+    data = await service.get_cardio_history(
+        current_user.id, exercise_id, start_date, end_date
+    )
+
+    return CardioHistoryResponse(
+        exercise_id=exercise_id,
+        exercise_name=exercise["name"],
+        data=[CardioHistoryDataPoint(**d) for d in data],
+    )
+
+
+@router.get(
+    "/analytics/trends",
+    response_model=WorkoutTrendsResponse,
+    summary="Get workout trends",
+    description="Get weekly workout trends over a date range",
+)
+async def get_workout_trends(
+    start_date: date = Query(..., description="Start date"),
+    end_date: date = Query(..., description="End date"),
+    current_user: UserResponse = Depends(get_current_user),
+) -> WorkoutTrendsResponse:
+    """Get weekly workout trends for charts."""
+    service = get_workout_service()
+
+    data = await service.get_workout_trends(
+        current_user.id, start_date, end_date
+    )
+    goals = await service.get_goals(current_user.id)
+
+    return WorkoutTrendsResponse(
+        data=[WeeklyTrendDataPoint(**d) for d in data],
+        workouts_per_week_target=goals.get("workouts_per_week_target") if goals else None,
+        minutes_per_week_target=goals.get("minutes_per_week_target") if goals else None,
+    )
