@@ -9,12 +9,16 @@ Handles:
 - Workout goals management
 """
 
+import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
 from app.core.logging_config import get_logger
 from app.services.supabase_client import SupabaseService, get_supabase_service
+
+# Regex to strip XML/HTML tags from exercise names
+_TAG_RE = re.compile(r"<[^>]+>")
 
 logger = get_logger(__name__)
 
@@ -33,6 +37,12 @@ class WorkoutService:
         self, user_id: str, exercise_data: dict[str, Any]
     ) -> dict[str, Any]:
         """Create a custom exercise for a user."""
+        # Sanitize name: strip XML/HTML tags and collapse whitespace
+        if "name" in exercise_data:
+            name = _TAG_RE.sub("", exercise_data["name"]).strip()
+            name = re.sub(r"\s+", " ", name)
+            exercise_data["name"] = name
+
         logger.info(f"Creating exercise for user {user_id}: {exercise_data.get('name')}")
 
         data = {
@@ -72,6 +82,11 @@ class WorkoutService:
         self, exercise_id: str, user_id: str, update_data: dict[str, Any]
     ) -> Optional[dict[str, Any]]:
         """Update a user's custom exercise."""
+        if "name" in update_data:
+            name = _TAG_RE.sub("", update_data["name"]).strip()
+            name = re.sub(r"\s+", " ", name)
+            update_data["name"] = name
+
         response = (
             self.supabase.admin_client.table("exercises")
             .update(update_data)
@@ -102,30 +117,51 @@ class WorkoutService:
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[dict], int]:
-        """Search exercises by name/category (global + user's custom)."""
+        """Search exercises by name/category (global + user's custom).
+
+        Results are sorted with user's custom exercises first, then verified
+        global exercises, both alphabetical by name.
+        """
         offset = (page - 1) * page_size
 
-        # Build query
-        q = (
+        # Fetch user's custom exercises first
+        user_q = (
             self.supabase.admin_client.table("exercises")
             .select("*", count="exact")
-            .or_(f"user_id.is.null,user_id.eq.{user_id}")
+            .eq("user_id", user_id)
         )
-
         if query:
-            q = q.ilike("name", f"%{query}%")
-
+            user_q = user_q.ilike("name", f"%{query}%")
         if category:
-            q = q.eq("category", category)
+            user_q = user_q.eq("category", category)
+        user_response = user_q.order("name").execute()
 
-        response = (
-            q.order("is_verified", desc=True)
-            .order("name")
-            .range(offset, offset + page_size - 1)
-            .execute()
+        user_exercises = user_response.data or []
+        user_count = user_response.count or 0
+
+        # Fetch global exercises
+        global_q = (
+            self.supabase.admin_client.table("exercises")
+            .select("*", count="exact")
+            .is_("user_id", "null")
         )
+        if query:
+            global_q = global_q.ilike("name", f"%{query}%")
+        if category:
+            global_q = global_q.eq("category", category)
+        global_response = global_q.order("name").execute()
 
-        return response.data, response.count or 0
+        global_exercises = global_response.data or []
+        global_count = global_response.count or 0
+
+        # Combine: user's custom first, then global
+        all_exercises = user_exercises + global_exercises
+        total = user_count + global_count
+
+        # Apply pagination
+        paginated = all_exercises[offset:offset + page_size]
+
+        return paginated, total
 
     async def get_user_exercises(
         self, user_id: str, page: int = 1, page_size: int = 50
@@ -597,6 +633,318 @@ class WorkoutService:
         )
 
         return response.data[0] if response.data else None
+
+    # =========================================================================
+    # ANALYTICS
+    # =========================================================================
+
+    async def get_logged_exercises(
+        self, user_id: str, set_type: Optional[str] = None, query: str = ""
+    ) -> list[dict[str, Any]]:
+        """Get exercises the user has actually logged sets for.
+
+        Returns exercise records (with id, name, category) for exercises
+        that appear in the user's workout_sets, optionally filtered by
+        set_type ('strength' or 'cardio') and name search.
+        """
+        # 1. Get distinct exercise_ids from user's sets
+        q = (
+            self.supabase.admin_client.table("workout_sets")
+            .select("exercise_id")
+            .eq("user_id", user_id)
+        )
+        if set_type:
+            q = q.eq("set_type", set_type)
+
+        sets_response = q.execute()
+
+        if not sets_response.data:
+            return []
+
+        # Deduplicate exercise_ids
+        exercise_ids = list({s["exercise_id"] for s in sets_response.data})
+
+        # 2. Fetch those exercises
+        ex_q = (
+            self.supabase.admin_client.table("exercises")
+            .select("*")
+            .in_("id", exercise_ids)
+        )
+        if query:
+            ex_q = ex_q.ilike("name", f"%{query}%")
+
+        exercises_response = ex_q.order("name").execute()
+
+        return exercises_response.data or []
+
+    async def get_exercise_history(
+        self, user_id: str, exercise_id: str, start_date: date, end_date: date
+    ) -> list[dict[str, Any]]:
+        """Get exercise performance history over a date range.
+
+        Returns per-date aggregations: max_weight, total_volume, total_reps, avg_rpe, total_sets.
+        """
+        # 1. Fetch sessions in range → get session IDs + date map
+        sessions_response = (
+            self.supabase.admin_client.table("workout_sessions")
+            .select("id, session_date")
+            .eq("user_id", user_id)
+            .gte("session_date", start_date.isoformat())
+            .lte("session_date", end_date.isoformat())
+            .execute()
+        )
+
+        if not sessions_response.data:
+            return []
+
+        session_ids = [s["id"] for s in sessions_response.data]
+        session_date_map = {s["id"]: s["session_date"] for s in sessions_response.data}
+
+        # 2. Fetch sets for this exercise in those sessions
+        sets_response = (
+            self.supabase.admin_client.table("workout_sets")
+            .select("session_id, weight_kg, reps, rpe")
+            .in_("session_id", session_ids)
+            .eq("exercise_id", exercise_id)
+            .execute()
+        )
+
+        if not sets_response.data:
+            return []
+
+        # 3. Group by date and aggregate
+        date_data: dict[str, dict] = {}
+        for s in sets_response.data:
+            d = session_date_map[s["session_id"]]
+            if d not in date_data:
+                date_data[d] = {
+                    "date": d,
+                    "max_weight_kg": None,
+                    "total_volume_kg": 0.0,
+                    "total_reps": 0,
+                    "rpe_sum": 0.0,
+                    "rpe_count": 0,
+                    "total_sets": 0,
+                }
+            agg = date_data[d]
+            agg["total_sets"] += 1
+
+            weight = float(s["weight_kg"]) if s.get("weight_kg") is not None else None
+            reps = s.get("reps") or 0
+
+            if weight is not None:
+                if agg["max_weight_kg"] is None or weight > agg["max_weight_kg"]:
+                    agg["max_weight_kg"] = weight
+                if reps > 0:
+                    agg["total_volume_kg"] += weight * reps
+
+            agg["total_reps"] += reps
+
+            if s.get("rpe") is not None:
+                agg["rpe_sum"] += float(s["rpe"])
+                agg["rpe_count"] += 1
+
+        # 4. Finalize and sort
+        result = []
+        for d in sorted(date_data.keys()):
+            agg = date_data[d]
+            result.append({
+                "date": agg["date"],
+                "max_weight_kg": agg["max_weight_kg"],
+                "total_volume_kg": agg["total_volume_kg"] if agg["total_volume_kg"] > 0 else None,
+                "total_reps": agg["total_reps"],
+                "avg_rpe": round(agg["rpe_sum"] / agg["rpe_count"], 1) if agg["rpe_count"] > 0 else None,
+                "total_sets": agg["total_sets"],
+            })
+
+        return result
+
+    async def get_cardio_history(
+        self, user_id: str, exercise_id: str, start_date: date, end_date: date
+    ) -> list[dict[str, Any]]:
+        """Get cardio exercise history over a date range.
+
+        Returns per-date aggregations: distance, duration, pace, heart rate, calories.
+        """
+        # 1. Fetch sessions in range
+        sessions_response = (
+            self.supabase.admin_client.table("workout_sessions")
+            .select("id, session_date")
+            .eq("user_id", user_id)
+            .gte("session_date", start_date.isoformat())
+            .lte("session_date", end_date.isoformat())
+            .execute()
+        )
+
+        if not sessions_response.data:
+            return []
+
+        session_ids = [s["id"] for s in sessions_response.data]
+        session_date_map = {s["id"]: s["session_date"] for s in sessions_response.data}
+
+        # 2. Fetch cardio sets for this exercise
+        sets_response = (
+            self.supabase.admin_client.table("workout_sets")
+            .select("session_id, distance_meters, duration_seconds, avg_heart_rate, calories_burned")
+            .in_("session_id", session_ids)
+            .eq("exercise_id", exercise_id)
+            .eq("set_type", "cardio")
+            .execute()
+        )
+
+        if not sets_response.data:
+            return []
+
+        # 3. Group by date and aggregate
+        date_data: dict[str, dict] = {}
+        for s in sets_response.data:
+            d = session_date_map[s["session_id"]]
+            if d not in date_data:
+                date_data[d] = {
+                    "date": d,
+                    "total_distance_meters": 0.0,
+                    "total_duration_seconds": 0,
+                    "hr_weighted_sum": 0.0,
+                    "hr_duration_sum": 0,
+                    "total_calories": 0,
+                    "total_sets": 0,
+                }
+            agg = date_data[d]
+            agg["total_sets"] += 1
+
+            if s.get("distance_meters") is not None:
+                agg["total_distance_meters"] += float(s["distance_meters"])
+            if s.get("duration_seconds") is not None:
+                agg["total_duration_seconds"] += s["duration_seconds"]
+                # Weighted HR average
+                if s.get("avg_heart_rate") is not None:
+                    agg["hr_weighted_sum"] += s["avg_heart_rate"] * s["duration_seconds"]
+                    agg["hr_duration_sum"] += s["duration_seconds"]
+            if s.get("calories_burned") is not None:
+                agg["total_calories"] += s["calories_burned"]
+
+        # 4. Finalize and sort
+        result = []
+        for d in sorted(date_data.keys()):
+            agg = date_data[d]
+            # Compute average pace: total_duration / (total_distance / 1000)
+            avg_pace = None
+            if agg["total_distance_meters"] > 0 and agg["total_duration_seconds"] > 0:
+                km = agg["total_distance_meters"] / 1000.0
+                avg_pace = round(agg["total_duration_seconds"] / km)
+
+            avg_hr = None
+            if agg["hr_duration_sum"] > 0:
+                avg_hr = round(agg["hr_weighted_sum"] / agg["hr_duration_sum"])
+
+            result.append({
+                "date": agg["date"],
+                "total_distance_meters": agg["total_distance_meters"] if agg["total_distance_meters"] > 0 else None,
+                "total_duration_seconds": agg["total_duration_seconds"] if agg["total_duration_seconds"] > 0 else None,
+                "avg_pace_seconds_per_km": avg_pace,
+                "avg_heart_rate": avg_hr,
+                "total_calories": agg["total_calories"] if agg["total_calories"] > 0 else None,
+                "total_sets": agg["total_sets"],
+            })
+
+        return result
+
+    async def get_workout_trends(
+        self, user_id: str, start_date: date, end_date: date
+    ) -> list[dict[str, Any]]:
+        """Get weekly workout trends over a date range.
+
+        Returns per-ISO-week aggregations: sessions, sets, volume, distance, duration.
+        """
+        # 1. Fetch sessions in range
+        sessions_response = (
+            self.supabase.admin_client.table("workout_sessions")
+            .select("id, session_date, start_time, end_time")
+            .eq("user_id", user_id)
+            .gte("session_date", start_date.isoformat())
+            .lte("session_date", end_date.isoformat())
+            .order("session_date")
+            .execute()
+        )
+
+        if not sessions_response.data:
+            return []
+
+        session_ids = [s["id"] for s in sessions_response.data]
+
+        # 2. Fetch all sets in those sessions
+        sets_response = (
+            self.supabase.admin_client.table("workout_sets")
+            .select("session_id, set_type, weight_kg, reps, distance_meters, duration_seconds")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+
+        # Build sets-per-session map
+        sets_by_session: dict[str, list] = {}
+        for s in sets_response.data:
+            sid = s["session_id"]
+            if sid not in sets_by_session:
+                sets_by_session[sid] = []
+            sets_by_session[sid].append(s)
+
+        # 3. Group sessions by ISO week (Monday-based)
+        week_data: dict[str, dict] = {}
+        for session in sessions_response.data:
+            session_date_obj = date.fromisoformat(session["session_date"])
+            # ISO week: year-Wnn
+            iso_year, iso_week, _ = session_date_obj.isocalendar()
+            week_key = f"{iso_year}-W{iso_week:02d}"
+
+            # Compute week_start (Monday)
+            week_start = session_date_obj - timedelta(days=session_date_obj.weekday())
+
+            if week_key not in week_data:
+                week_data[week_key] = {
+                    "week": week_key,
+                    "week_start": week_start.isoformat(),
+                    "total_sessions": 0,
+                    "total_sets": 0,
+                    "total_volume_kg": 0.0,
+                    "total_distance_meters": 0.0,
+                    "total_duration_minutes": 0.0,
+                }
+
+            agg = week_data[week_key]
+            agg["total_sessions"] += 1
+
+            # Session duration
+            duration_mins = self._compute_session_duration(session)
+            if duration_mins:
+                agg["total_duration_minutes"] += duration_mins
+
+            # Aggregate sets
+            session_sets = sets_by_session.get(session["id"], [])
+            agg["total_sets"] += len(session_sets)
+
+            for s in session_sets:
+                # Volume from strength sets
+                if s.get("weight_kg") is not None and s.get("reps") is not None and s["reps"] > 0:
+                    agg["total_volume_kg"] += float(s["weight_kg"]) * s["reps"]
+                # Distance from cardio sets
+                if s.get("distance_meters") is not None:
+                    agg["total_distance_meters"] += float(s["distance_meters"])
+
+        # 4. Finalize and sort by week
+        result = []
+        for week_key in sorted(week_data.keys()):
+            agg = week_data[week_key]
+            result.append({
+                "week": agg["week"],
+                "week_start": agg["week_start"],
+                "total_sessions": agg["total_sessions"],
+                "total_sets": agg["total_sets"],
+                "total_volume_kg": agg["total_volume_kg"] if agg["total_volume_kg"] > 0 else None,
+                "total_distance_meters": agg["total_distance_meters"] if agg["total_distance_meters"] > 0 else None,
+                "total_duration_minutes": round(agg["total_duration_minutes"], 1) if agg["total_duration_minutes"] > 0 else None,
+            })
+
+        return result
 
     # =========================================================================
     # HELPER METHODS

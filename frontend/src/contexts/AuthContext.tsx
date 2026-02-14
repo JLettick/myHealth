@@ -14,6 +14,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { AxiosError } from 'axios';
@@ -189,6 +190,9 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
     }
   }, [setUser]);
 
+  // Guard against React 18 StrictMode double-mount running checkAuth twice
+  const hasCheckedRef = useRef(false);
+
   /**
    * Check authentication status on mount.
    *
@@ -197,6 +201,9 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
    * If both fail, the user is not authenticated.
    */
   useEffect(() => {
+    if (hasCheckedRef.current) return;
+    hasCheckedRef.current = true;
+
     const checkAuth = async () => {
       // If we have an access token in memory, try to use it
       const accessToken = tokenStorage.getAccessToken();
@@ -208,12 +215,16 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
           logger.info('Auth check successful', { userId: user.id });
           return;
         } catch {
-          // Access token expired, fall through to refresh
-          logger.debug('Access token invalid, attempting refresh');
+          // Access token expired — the interceptor already attempted a refresh.
+          // If we're here, the refresh failed too. Don't try again.
+          logger.debug('Access token invalid, refresh failed');
+          tokenStorage.clearTokens();
+          setState((prev) => ({ ...prev, isLoading: false }));
+          return;
         }
       }
 
-      // No access token or it was invalid — try refreshing via cookie
+      // No access token in memory — try refreshing via cookie
       try {
         const response = await authApi.refreshToken();
         tokenStorage.setAccessToken(response.session.access_token);

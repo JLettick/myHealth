@@ -50,6 +50,12 @@ export function Header(): JSX.Element {
                   Workouts
                 </Link>
                 <Link
+                  to="/analytics"
+                  className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  Analytics
+                </Link>
+                <Link
                   to="/agent"
                   className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
                 >

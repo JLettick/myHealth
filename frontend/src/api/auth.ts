@@ -4,6 +4,7 @@
  * Provides typed functions for all authentication-related API calls.
  */
 
+import axios from 'axios';
 import apiClient from './client';
 import type {
   AuthResponse,
@@ -13,6 +14,9 @@ import type {
   User,
 } from '../types/auth';
 import { logger } from '../utils/logger';
+
+// Base URL for raw axios calls that must bypass interceptors
+const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 /**
  * Register a new user account.
@@ -43,10 +47,19 @@ export async function logout(): Promise<MessageResponse> {
 
 /**
  * Refresh access token using refresh token cookie (sent automatically).
+ * Uses raw axios (not apiClient) to bypass the 401 interceptor —
+ * a failed refresh must NOT trigger another refresh attempt.
  */
 export async function refreshToken(): Promise<AuthResponse> {
   logger.info('Refreshing token');
-  const response = await apiClient.post<AuthResponse>('/auth/refresh', {});
+  const response = await axios.post<AuthResponse>(
+    `${API_URL}/auth/refresh`,
+    {},
+    {
+      headers: { 'Content-Type': 'application/json' },
+      withCredentials: true,
+    }
+  );
   return response.data;
 }
 
