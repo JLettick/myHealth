@@ -6,7 +6,7 @@ execute_tool() function that dispatches tool calls to existing services.
 """
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -123,6 +123,87 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "json": {
                     "type": "object",
                     "properties": {},
+                    "required": [],
+                }
+            },
+        }
+    },
+    # --- Analysis tools (multi-day trends) ---
+    {
+        "toolSpec": {
+            "name": "get_nutrition_trends",
+            "description": "Analyze the user's nutrition over a date range. Returns daily calorie/macro data, averages, goal adherence percentages, and days tracked. Max 30-day range.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "start_date": {
+                            "type": "string",
+                            "description": "Start date in YYYY-MM-DD format.",
+                        },
+                        "end_date": {
+                            "type": "string",
+                            "description": "End date in YYYY-MM-DD format.",
+                        },
+                    },
+                    "required": ["start_date", "end_date"],
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "get_workout_progression",
+            "description": "Analyze progression for a specific exercise over time. For strength: tracks max weight, volume, reps. For cardio: tracks pace, distance, duration. Returns data points and first-vs-last comparison.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "exercise_name": {
+                            "type": "string",
+                            "description": "Name of the exercise to analyze (e.g. 'bench press', 'running').",
+                        },
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to look back. Defaults to 30, max 90.",
+                        },
+                    },
+                    "required": ["exercise_name"],
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "get_workout_trends",
+            "description": "Analyze weekly workout trends including session count, total volume, distance, and duration. Compares against workout goals if set.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "weeks": {
+                            "type": "integer",
+                            "description": "Number of weeks to analyze. Defaults to 4, max 12.",
+                        },
+                    },
+                    "required": [],
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "get_recovery_trends",
+            "description": "Analyze Whoop recovery and sleep trends. Returns recovery scores, HRV, resting HR, sleep hours/quality, and trend direction (improving/declining/stable). Requires Whoop connection.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to analyze. Defaults to 7, max 30.",
+                        },
+                    },
                     "required": [],
                 }
             },
@@ -393,6 +474,243 @@ async def _get_whoop_summary(user_id: str, tool_input: Dict[str, Any]) -> Dict[s
     return _serialize(summary)
 
 
+def _compute_trend(values: List[Optional[float]], threshold: float = 0.05) -> str:
+    """
+    Compare first-half vs second-half averages to determine trend direction.
+
+    Returns "improving", "declining", "stable", or "insufficient_data".
+    """
+    valid = [v for v in values if v is not None]
+    if len(valid) < 4:
+        return "insufficient_data"
+
+    mid = len(valid) // 2
+    first_half = valid[:mid]
+    second_half = valid[mid:]
+
+    avg_first = sum(first_half) / len(first_half)
+    avg_second = sum(second_half) / len(second_half)
+
+    if avg_first == 0:
+        return "stable" if avg_second == 0 else "improving"
+
+    change = (avg_second - avg_first) / abs(avg_first)
+    if change > threshold:
+        return "improving"
+    elif change < -threshold:
+        return "declining"
+    return "stable"
+
+
+async def _get_nutrition_trends(user_id: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+    from app.services.nutrition_service import get_nutrition_service
+    service = get_nutrition_service()
+
+    start = _parse_date(tool_input.get("start_date"))
+    end = _parse_date(tool_input.get("end_date"))
+
+    # Cap range at 30 days
+    max_range = timedelta(days=30)
+    if (end - start) > max_range:
+        start = end - max_range
+
+    if start > end:
+        start, end = end, start
+
+    # Fetch goals once
+    goals = await service.get_goals(user_id)
+
+    daily_data = []
+    current = start
+    while current <= end:
+        summary = await service.get_daily_summary(user_id, current, goals=goals)
+        daily_data.append(_serialize(summary))
+        current += timedelta(days=1)
+
+    # Compute averages only for days with logged food
+    days_with_food = [d for d in daily_data if float(d.get("total_calories", 0)) > 0]
+    days_tracked = len(days_with_food)
+    days_in_range = (end - start).days + 1
+
+    averages: Dict[str, Any] = {}
+    if days_tracked > 0:
+        averages = {
+            "calories": round(sum(float(d.get("total_calories", 0)) for d in days_with_food) / days_tracked, 1),
+            "protein_g": round(sum(float(d.get("total_protein_g", 0)) for d in days_with_food) / days_tracked, 1),
+            "carbs_g": round(sum(float(d.get("total_carbs_g", 0)) for d in days_with_food) / days_tracked, 1),
+            "fat_g": round(sum(float(d.get("total_fat_g", 0)) for d in days_with_food) / days_tracked, 1),
+        }
+
+    # Goal adherence
+    goal_adherence: Dict[str, Any] = {}
+    if goals and days_tracked > 0:
+        cal_target = float(goals.get("calories_target") or 0)
+        protein_target = float(goals.get("protein_g_target") or 0)
+        if cal_target > 0:
+            goal_adherence["calories_pct"] = round(averages["calories"] / cal_target * 100, 1)
+        if protein_target > 0:
+            goal_adherence["protein_pct"] = round(averages["protein_g"] / protein_target * 100, 1)
+
+    return {
+        "daily_data": daily_data,
+        "averages": averages,
+        "goals": _serialize(goals) if goals else None,
+        "goal_adherence": goal_adherence,
+        "days_tracked": days_tracked,
+        "days_in_range": days_in_range,
+    }
+
+
+async def _get_workout_progression(user_id: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+    from app.services.workout_service import get_workout_service
+    service = get_workout_service()
+
+    exercise_name = tool_input.get("exercise_name", "")
+    days = min(tool_input.get("days", 30), 90)
+
+    # Search for the exercise
+    exercises, total = await service.search_exercises(user_id, query=exercise_name, page=1, page_size=5)
+    if not exercises:
+        return {"error": f"Exercise '{exercise_name}' not found. Try searching with search_exercises first."}
+
+    exercise = exercises[0]
+    exercise_id = exercise["id"]
+    category = exercise.get("category", "strength")
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=days)
+
+    if category == "cardio":
+        data_points = await service.get_cardio_history(user_id, exercise_id, start_date, end_date)
+        summary: Dict[str, Any] = {}
+        if len(data_points) >= 2:
+            first = data_points[0]
+            last = data_points[-1]
+            if first.get("avg_pace_seconds_per_km") and last.get("avg_pace_seconds_per_km"):
+                pace_change = last["avg_pace_seconds_per_km"] - first["avg_pace_seconds_per_km"]
+                summary["pace_change_seconds_per_km"] = pace_change
+                summary["pace_improved"] = pace_change < 0  # Lower pace = faster
+            if first.get("total_distance_meters") and last.get("total_distance_meters"):
+                dist_change_pct = (last["total_distance_meters"] - first["total_distance_meters"]) / first["total_distance_meters"] * 100
+                summary["distance_change_pct"] = round(dist_change_pct, 1)
+        return _serialize({
+            "exercise": {"name": exercise.get("name"), "id": exercise_id, "category": category},
+            "type": "cardio",
+            "data_points": data_points,
+            "total_sessions": len(data_points),
+            "summary": summary,
+        })
+    else:
+        data_points = await service.get_exercise_history(user_id, exercise_id, start_date, end_date)
+        summary = {}
+        if len(data_points) >= 2:
+            first = data_points[0]
+            last = data_points[-1]
+            if first.get("max_weight_kg") and last.get("max_weight_kg"):
+                weight_change_pct = (last["max_weight_kg"] - first["max_weight_kg"]) / first["max_weight_kg"] * 100
+                summary["weight_change_pct"] = round(weight_change_pct, 1)
+            if first.get("total_volume_kg") and last.get("total_volume_kg"):
+                vol_change_pct = (last["total_volume_kg"] - first["total_volume_kg"]) / first["total_volume_kg"] * 100
+                summary["volume_change_pct"] = round(vol_change_pct, 1)
+        return _serialize({
+            "exercise": {"name": exercise.get("name"), "id": exercise_id, "category": category},
+            "type": "strength",
+            "data_points": data_points,
+            "total_sessions": len(data_points),
+            "summary": summary,
+        })
+
+
+async def _get_workout_trends(user_id: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+    from app.services.workout_service import get_workout_service
+    service = get_workout_service()
+
+    weeks = min(tool_input.get("weeks", 4), 12)
+    end_date = date.today()
+    start_date = end_date - timedelta(weeks=weeks)
+
+    weekly_data = await service.get_workout_trends(user_id, start_date, end_date)
+    goals = await service.get_goals(user_id)
+
+    # Compute per-week averages
+    averages: Dict[str, Any] = {}
+    if weekly_data:
+        num_weeks = len(weekly_data)
+        averages = {
+            "sessions_per_week": round(sum(w.get("total_sessions", 0) for w in weekly_data) / num_weeks, 1),
+            "sets_per_week": round(sum(w.get("total_sets", 0) for w in weekly_data) / num_weeks, 1),
+            "volume_kg_per_week": round(sum(float(w.get("total_volume_kg") or 0) for w in weekly_data) / num_weeks, 1),
+            "duration_minutes_per_week": round(sum(float(w.get("total_duration_minutes") or 0) for w in weekly_data) / num_weeks, 1),
+        }
+
+    return _serialize({
+        "weekly_data": weekly_data,
+        "averages": averages,
+        "goals": goals,
+        "weeks_analyzed": len(weekly_data),
+    })
+
+
+async def _get_recovery_trends(user_id: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+    from app.services.whoop_sync_service import get_whoop_sync_service
+    from app.services.whoop_service import get_whoop_service
+
+    whoop_service = get_whoop_service()
+    connection = await whoop_service.get_connection(user_id)
+    if not connection:
+        return {"error": "Whoop is not connected. The user needs to connect their Whoop account first."}
+
+    days = min(tool_input.get("days", 7), 30)
+    sync_service = get_whoop_sync_service()
+
+    recovery_data = await sync_service.get_recovery_trend_data(user_id, days)
+    sleep_data = await sync_service.get_sleep_trend_data(user_id, days)
+
+    # Compute averages
+    recovery_averages: Dict[str, Any] = {}
+    if recovery_data:
+        scores = [d["recovery_score"] for d in recovery_data if d.get("recovery_score") is not None]
+        hrvs = [d["hrv_rmssd_milli"] for d in recovery_data if d.get("hrv_rmssd_milli") is not None]
+        rhrs = [d["resting_heart_rate"] for d in recovery_data if d.get("resting_heart_rate") is not None]
+        if scores:
+            recovery_averages["recovery_score"] = round(sum(scores) / len(scores), 1)
+        if hrvs:
+            recovery_averages["hrv_rmssd_milli"] = round(sum(hrvs) / len(hrvs), 1)
+        if rhrs:
+            recovery_averages["resting_heart_rate"] = round(sum(rhrs) / len(rhrs), 1)
+
+    sleep_averages: Dict[str, Any] = {}
+    if sleep_data:
+        sleep_hours_list = [d["total_sleep_hours"] for d in sleep_data if d.get("total_sleep_hours")]
+        sleep_scores = [d["sleep_score"] for d in sleep_data if d.get("sleep_score") is not None]
+        efficiencies = [d["sleep_efficiency"] for d in sleep_data if d.get("sleep_efficiency") is not None]
+        if sleep_hours_list:
+            sleep_averages["total_sleep_hours"] = round(sum(sleep_hours_list) / len(sleep_hours_list), 2)
+        if sleep_scores:
+            sleep_averages["sleep_score"] = round(sum(sleep_scores) / len(sleep_scores), 1)
+        if efficiencies:
+            sleep_averages["sleep_efficiency"] = round(sum(efficiencies) / len(efficiencies), 1)
+
+    # Compute trend directions
+    trend: Dict[str, str] = {}
+    if recovery_data:
+        trend["recovery_score"] = _compute_trend([d.get("recovery_score") for d in recovery_data])
+        trend["hrv"] = _compute_trend([d.get("hrv_rmssd_milli") for d in recovery_data])
+    if sleep_data:
+        trend["sleep_hours"] = _compute_trend([d.get("total_sleep_hours") for d in sleep_data])
+        trend["sleep_score"] = _compute_trend([d.get("sleep_score") for d in sleep_data])
+
+    return {
+        "recovery_data": recovery_data,
+        "sleep_data": sleep_data,
+        "recovery_averages": recovery_averages,
+        "sleep_averages": sleep_averages,
+        "trend": trend,
+        "days_with_recovery_data": len(recovery_data),
+        "days_with_sleep_data": len(sleep_data),
+    }
+
+
 async def _log_food_entry(user_id: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     from app.services.nutrition_service import get_nutrition_service
     service = get_nutrition_service()
@@ -504,6 +822,10 @@ _TOOL_EXECUTORS = {
     "get_workout_summary": _get_workout_summary,
     "search_exercises": _search_exercises,
     "get_whoop_summary": _get_whoop_summary,
+    "get_nutrition_trends": _get_nutrition_trends,
+    "get_workout_progression": _get_workout_progression,
+    "get_workout_trends": _get_workout_trends,
+    "get_recovery_trends": _get_recovery_trends,
     "log_food_entry": _log_food_entry,
     "create_food": _create_food,
     "log_workout": _log_workout,
@@ -518,6 +840,10 @@ _TOOL_ACTION_LABELS = {
     "get_workout_summary": "Checked workout data",
     "search_exercises": "Searched exercises",
     "get_whoop_summary": "Checked Whoop metrics",
+    "get_nutrition_trends": "Analyzed nutrition trends",
+    "get_workout_progression": "Analyzed exercise progression",
+    "get_workout_trends": "Analyzed workout trends",
+    "get_recovery_trends": "Analyzed recovery trends",
     "log_food_entry": "Logged food entry",
     "create_food": "Created custom food",
     "log_workout": "Logged workout",
