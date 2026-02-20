@@ -444,6 +444,134 @@ class WhoopSyncService:
             return None
         return round(sum(valid) / len(valid), 2)
 
+    async def get_recovery_trend_data(
+        self, user_id: str, days: int = 7
+    ) -> list[dict[str, Any]]:
+        """
+        Get recovery trend data for the last N days.
+
+        Args:
+            user_id: Application user ID
+            days: Number of days to look back (default 7)
+
+        Returns:
+            List of daily recovery data sorted oldest-first
+        """
+        # Get recent cycles (ordered newest-first)
+        cycles_result = (
+            self.supabase.admin_client.table("whoop_cycles")
+            .select("whoop_cycle_id, start_time")
+            .eq("user_id", user_id)
+            .order("start_time", desc=True)
+            .limit(days)
+            .execute()
+        )
+
+        if not cycles_result.data:
+            return []
+
+        # Build cycle_id -> date mapping
+        cycle_dates: dict[str, str] = {}
+        cycle_ids: list[str] = []
+        for cycle in cycles_result.data:
+            cid = cycle.get("whoop_cycle_id")
+            if cid:
+                cycle_ids.append(cid)
+                # Extract date from start_time
+                start_time = cycle.get("start_time", "")
+                cycle_dates[cid] = start_time[:10] if start_time else ""
+
+        if not cycle_ids:
+            return []
+
+        # Get recovery records for these cycles
+        recovery_result = (
+            self.supabase.admin_client.table("whoop_recovery")
+            .select("whoop_cycle_id, recovery_score, hrv_rmssd_milli, resting_heart_rate, spo2_percentage")
+            .eq("user_id", user_id)
+            .in_("whoop_cycle_id", cycle_ids)
+            .execute()
+        )
+
+        # Build recovery lookup
+        recovery_by_cycle: dict[str, dict] = {}
+        for rec in recovery_result.data:
+            recovery_by_cycle[rec["whoop_cycle_id"]] = rec
+
+        # Merge and build result
+        result = []
+        for cid in cycle_ids:
+            rec = recovery_by_cycle.get(cid, {})
+            if rec.get("recovery_score") is not None:
+                result.append({
+                    "date": cycle_dates.get(cid, ""),
+                    "recovery_score": float(rec["recovery_score"]) if rec.get("recovery_score") is not None else None,
+                    "hrv_rmssd_milli": float(rec["hrv_rmssd_milli"]) if rec.get("hrv_rmssd_milli") is not None else None,
+                    "resting_heart_rate": float(rec["resting_heart_rate"]) if rec.get("resting_heart_rate") is not None else None,
+                    "spo2_percentage": float(rec["spo2_percentage"]) if rec.get("spo2_percentage") is not None else None,
+                })
+
+        # Sort oldest-first
+        result.sort(key=lambda x: x["date"])
+        return result
+
+    async def get_sleep_trend_data(
+        self, user_id: str, days: int = 7
+    ) -> list[dict[str, Any]]:
+        """
+        Get sleep trend data for the last N days.
+
+        Args:
+            user_id: Application user ID
+            days: Number of days to look back (default 7)
+
+        Returns:
+            List of daily sleep data sorted oldest-first
+        """
+        sleep_result = (
+            self.supabase.admin_client.table("whoop_sleep")
+            .select(
+                "start_time, sleep_score, sleep_efficiency, "
+                "total_in_bed_milli, total_awake_milli, "
+                "total_rem_sleep_milli, total_slow_wave_sleep_milli, "
+                "total_light_sleep_milli, respiratory_rate"
+            )
+            .eq("user_id", user_id)
+            .eq("is_nap", False)
+            .order("start_time", desc=True)
+            .limit(days)
+            .execute()
+        )
+
+        if not sleep_result.data:
+            return []
+
+        result = []
+        for sleep in sleep_result.data:
+            in_bed = sleep.get("total_in_bed_milli") or 0
+            awake = sleep.get("total_awake_milli") or 0
+            total_sleep_hours = round((in_bed - awake) / 3600000, 2) if in_bed > awake else 0
+
+            rem_milli = sleep.get("total_rem_sleep_milli") or 0
+            deep_milli = sleep.get("total_slow_wave_sleep_milli") or 0
+            light_milli = sleep.get("total_light_sleep_milli") or 0
+
+            start_time = sleep.get("start_time", "")
+            result.append({
+                "date": start_time[:10] if start_time else "",
+                "sleep_score": float(sleep["sleep_score"]) if sleep.get("sleep_score") is not None else None,
+                "sleep_efficiency": float(sleep["sleep_efficiency"]) if sleep.get("sleep_efficiency") is not None else None,
+                "total_sleep_hours": total_sleep_hours,
+                "rem_hours": round(rem_milli / 3600000, 2),
+                "deep_sleep_hours": round(deep_milli / 3600000, 2),
+                "light_sleep_hours": round(light_milli / 3600000, 2),
+                "respiratory_rate": float(sleep["respiratory_rate"]) if sleep.get("respiratory_rate") is not None else None,
+            })
+
+        # Sort oldest-first
+        result.sort(key=lambda x: x["date"])
+        return result
+
     async def get_sleep_records(
         self,
         user_id: str,

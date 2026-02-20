@@ -1,7 +1,7 @@
 """Tests for agent tool definitions and execution."""
 
 import pytest
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -11,12 +11,13 @@ from app.services.agent_tools import (
     get_tool_action_label,
     _parse_date,
     _serialize,
+    _compute_trend,
 )
 
 
 class TestToolDefinitions:
-    def test_all_10_tools_defined(self):
-        assert len(TOOL_DEFINITIONS) == 10
+    def test_all_14_tools_defined(self):
+        assert len(TOOL_DEFINITIONS) == 14
 
     def test_all_tools_have_required_fields(self):
         for tool in TOOL_DEFINITIONS:
@@ -35,6 +36,10 @@ class TestToolDefinitions:
             "get_workout_summary",
             "search_exercises",
             "get_whoop_summary",
+            "get_nutrition_trends",
+            "get_workout_progression",
+            "get_workout_trends",
+            "get_recovery_trends",
             "log_food_entry",
             "create_food",
             "log_workout",
@@ -65,6 +70,30 @@ class TestToolDefinitions:
         create_ex = write_tools["create_exercise"]["toolSpec"]["inputSchema"]["json"]
         assert "name" in create_ex["required"]
         assert "category" in create_ex["required"]
+
+    def test_analysis_tools_have_correct_schemas(self):
+        """Analysis tools should have correct required/optional params."""
+        tools = {t["toolSpec"]["name"]: t for t in TOOL_DEFINITIONS}
+
+        # get_nutrition_trends requires start_date and end_date
+        nt = tools["get_nutrition_trends"]["toolSpec"]["inputSchema"]["json"]
+        assert "start_date" in nt["required"]
+        assert "end_date" in nt["required"]
+
+        # get_workout_progression requires exercise_name
+        wp = tools["get_workout_progression"]["toolSpec"]["inputSchema"]["json"]
+        assert "exercise_name" in wp["required"]
+        assert "days" in wp["properties"]
+
+        # get_workout_trends has no required params
+        wt = tools["get_workout_trends"]["toolSpec"]["inputSchema"]["json"]
+        assert wt["required"] == []
+        assert "weeks" in wt["properties"]
+
+        # get_recovery_trends has no required params
+        rt = tools["get_recovery_trends"]["toolSpec"]["inputSchema"]["json"]
+        assert rt["required"] == []
+        assert "days" in rt["properties"]
 
 
 class TestParseDate:
@@ -102,10 +131,46 @@ class TestSerialize:
         assert _serialize(None) is None
 
 
+class TestComputeTrend:
+    def test_insufficient_data(self):
+        assert _compute_trend([1.0, 2.0, 3.0]) == "insufficient_data"
+
+    def test_insufficient_data_with_nones(self):
+        assert _compute_trend([1.0, None, 2.0, None]) == "insufficient_data"
+
+    def test_improving(self):
+        # First half avg: 50, second half avg: 60 → 20% increase
+        assert _compute_trend([50.0, 50.0, 60.0, 60.0]) == "improving"
+
+    def test_declining(self):
+        # First half avg: 60, second half avg: 50 → ~17% decrease
+        assert _compute_trend([60.0, 60.0, 50.0, 50.0]) == "declining"
+
+    def test_stable(self):
+        # First half avg: 50, second half avg: 51 → 2% change (within 5%)
+        assert _compute_trend([50.0, 50.0, 51.0, 51.0]) == "stable"
+
+    def test_handles_none_values(self):
+        # valid values: [50, 50, 60, 60] after filtering
+        assert _compute_trend([50.0, None, 50.0, 60.0, None, 60.0]) == "improving"
+
+    def test_all_zeros_stable(self):
+        assert _compute_trend([0.0, 0.0, 0.0, 0.0]) == "stable"
+
+    def test_zero_to_positive_improving(self):
+        assert _compute_trend([0.0, 0.0, 5.0, 5.0]) == "improving"
+
+
 class TestGetToolActionLabel:
     def test_known_tools(self):
         assert get_tool_action_label("log_food_entry") == "Logged food entry"
         assert get_tool_action_label("get_whoop_summary") == "Checked Whoop metrics"
+
+    def test_analysis_tools(self):
+        assert get_tool_action_label("get_nutrition_trends") == "Analyzed nutrition trends"
+        assert get_tool_action_label("get_workout_progression") == "Analyzed exercise progression"
+        assert get_tool_action_label("get_workout_trends") == "Analyzed workout trends"
+        assert get_tool_action_label("get_recovery_trends") == "Analyzed recovery trends"
 
     def test_unknown_tool_returns_name(self):
         assert get_tool_action_label("unknown_tool") == "unknown_tool"
@@ -366,3 +431,313 @@ class TestExecuteTool:
 
             assert "error" in result
             assert "DB connection failed" in result["error"]
+
+
+class TestNutritionTrendsExecution:
+    @pytest.mark.asyncio
+    async def test_returns_daily_data_and_averages(self, user_id):
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        mock_goals = {"calories_target": 2000, "protein_g_target": 150}
+        mock_summary_day1 = {
+            "date": yesterday,
+            "total_calories": Decimal("1800"),
+            "total_protein_g": Decimal("120"),
+            "total_carbs_g": Decimal("200"),
+            "total_fat_g": Decimal("60"),
+            "meals": [],
+        }
+        mock_summary_day2 = {
+            "date": today,
+            "total_calories": Decimal("2200"),
+            "total_protein_g": Decimal("160"),
+            "total_carbs_g": Decimal("250"),
+            "total_fat_g": Decimal("70"),
+            "meals": [],
+        }
+
+        with patch(
+            "app.services.nutrition_service.get_nutrition_service"
+        ) as mock_get:
+            mock_service = MagicMock()
+            mock_service.get_goals = AsyncMock(return_value=mock_goals)
+            mock_service.get_daily_summary = AsyncMock(
+                side_effect=[mock_summary_day1, mock_summary_day2]
+            )
+            mock_get.return_value = mock_service
+
+            result = await execute_tool(
+                "get_nutrition_trends",
+                {"start_date": yesterday.isoformat(), "end_date": today.isoformat()},
+                user_id,
+            )
+
+            assert result["days_tracked"] == 2
+            assert result["days_in_range"] == 2
+            assert len(result["daily_data"]) == 2
+            assert result["averages"]["calories"] == 2000.0
+            assert result["goals"] is not None
+            assert "calories_pct" in result["goal_adherence"]
+
+    @pytest.mark.asyncio
+    async def test_caps_at_30_days(self, user_id):
+        today = date.today()
+        start = today - timedelta(days=60)
+
+        with patch(
+            "app.services.nutrition_service.get_nutrition_service"
+        ) as mock_get:
+            mock_service = MagicMock()
+            mock_service.get_goals = AsyncMock(return_value=None)
+            mock_service.get_daily_summary = AsyncMock(return_value={
+                "date": today, "total_calories": Decimal("0"), "meals": [],
+            })
+            mock_get.return_value = mock_service
+
+            result = await execute_tool(
+                "get_nutrition_trends",
+                {"start_date": start.isoformat(), "end_date": today.isoformat()},
+                user_id,
+            )
+
+            # Should be capped to 31 days (30 day range = 31 days inclusive)
+            assert result["days_in_range"] == 31
+
+    @pytest.mark.asyncio
+    async def test_no_food_logged_returns_zero_tracked(self, user_id):
+        today = date.today()
+        with patch(
+            "app.services.nutrition_service.get_nutrition_service"
+        ) as mock_get:
+            mock_service = MagicMock()
+            mock_service.get_goals = AsyncMock(return_value=None)
+            mock_service.get_daily_summary = AsyncMock(return_value={
+                "date": today, "total_calories": Decimal("0"), "meals": [],
+            })
+            mock_get.return_value = mock_service
+
+            result = await execute_tool(
+                "get_nutrition_trends",
+                {"start_date": today.isoformat(), "end_date": today.isoformat()},
+                user_id,
+            )
+
+            assert result["days_tracked"] == 0
+            assert result["averages"] == {}
+
+
+class TestWorkoutProgressionExecution:
+    @pytest.mark.asyncio
+    async def test_strength_exercise_returns_progression(self, user_id):
+        mock_exercises = [{"id": "ex-1", "name": "Bench Press", "category": "strength"}]
+        mock_history = [
+            {"date": "2026-01-01", "max_weight_kg": 60.0, "total_volume_kg": 3600.0, "total_reps": 30, "total_sets": 3},
+            {"date": "2026-01-15", "max_weight_kg": 65.0, "total_volume_kg": 3900.0, "total_reps": 30, "total_sets": 3},
+        ]
+
+        with patch(
+            "app.services.workout_service.get_workout_service"
+        ) as mock_get:
+            mock_service = MagicMock()
+            mock_service.search_exercises = AsyncMock(return_value=(mock_exercises, 1))
+            mock_service.get_exercise_history = AsyncMock(return_value=mock_history)
+            mock_get.return_value = mock_service
+
+            result = await execute_tool(
+                "get_workout_progression",
+                {"exercise_name": "bench press"},
+                user_id,
+            )
+
+            assert result["type"] == "strength"
+            assert result["total_sessions"] == 2
+            assert result["exercise"]["name"] == "Bench Press"
+            assert "weight_change_pct" in result["summary"]
+
+    @pytest.mark.asyncio
+    async def test_cardio_exercise_returns_progression(self, user_id):
+        mock_exercises = [{"id": "ex-2", "name": "Running", "category": "cardio"}]
+        mock_history = [
+            {"date": "2026-01-01", "total_distance_meters": 5000.0, "avg_pace_seconds_per_km": 330, "total_sets": 1},
+            {"date": "2026-01-15", "total_distance_meters": 5500.0, "avg_pace_seconds_per_km": 310, "total_sets": 1},
+        ]
+
+        with patch(
+            "app.services.workout_service.get_workout_service"
+        ) as mock_get:
+            mock_service = MagicMock()
+            mock_service.search_exercises = AsyncMock(return_value=(mock_exercises, 1))
+            mock_service.get_cardio_history = AsyncMock(return_value=mock_history)
+            mock_get.return_value = mock_service
+
+            result = await execute_tool(
+                "get_workout_progression",
+                {"exercise_name": "running"},
+                user_id,
+            )
+
+            assert result["type"] == "cardio"
+            assert result["total_sessions"] == 2
+            assert result["summary"]["pace_improved"] is True
+
+    @pytest.mark.asyncio
+    async def test_exercise_not_found(self, user_id):
+        with patch(
+            "app.services.workout_service.get_workout_service"
+        ) as mock_get:
+            mock_service = MagicMock()
+            mock_service.search_exercises = AsyncMock(return_value=([], 0))
+            mock_get.return_value = mock_service
+
+            result = await execute_tool(
+                "get_workout_progression",
+                {"exercise_name": "nonexistent"},
+                user_id,
+            )
+
+            assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_caps_days_at_90(self, user_id):
+        mock_exercises = [{"id": "ex-1", "name": "Squat", "category": "strength"}]
+
+        with patch(
+            "app.services.workout_service.get_workout_service"
+        ) as mock_get:
+            mock_service = MagicMock()
+            mock_service.search_exercises = AsyncMock(return_value=(mock_exercises, 1))
+            mock_service.get_exercise_history = AsyncMock(return_value=[])
+            mock_get.return_value = mock_service
+
+            result = await execute_tool(
+                "get_workout_progression",
+                {"exercise_name": "squat", "days": 200},
+                user_id,
+            )
+
+            # Verify it used 90 days max
+            call_args = mock_service.get_exercise_history.call_args
+            start_date = call_args[0][2]
+            end_date = call_args[0][3]
+            assert (end_date - start_date).days == 90
+
+
+class TestWorkoutTrendsExecution:
+    @pytest.mark.asyncio
+    async def test_returns_weekly_data_and_averages(self, user_id):
+        mock_weekly = [
+            {"week": "2026-W06", "total_sessions": 3, "total_sets": 15, "total_volume_kg": 5000.0, "total_duration_minutes": 180.0},
+            {"week": "2026-W07", "total_sessions": 4, "total_sets": 20, "total_volume_kg": 6000.0, "total_duration_minutes": 240.0},
+        ]
+        mock_goals = {"workouts_per_week_target": 4, "minutes_per_week_target": 200}
+
+        with patch(
+            "app.services.workout_service.get_workout_service"
+        ) as mock_get:
+            mock_service = MagicMock()
+            mock_service.get_workout_trends = AsyncMock(return_value=mock_weekly)
+            mock_service.get_goals = AsyncMock(return_value=mock_goals)
+            mock_get.return_value = mock_service
+
+            result = await execute_tool("get_workout_trends", {}, user_id)
+
+            assert result["weeks_analyzed"] == 2
+            assert len(result["weekly_data"]) == 2
+            assert result["averages"]["sessions_per_week"] == 3.5
+            assert result["goals"] is not None
+
+    @pytest.mark.asyncio
+    async def test_caps_weeks_at_12(self, user_id):
+        with patch(
+            "app.services.workout_service.get_workout_service"
+        ) as mock_get:
+            mock_service = MagicMock()
+            mock_service.get_workout_trends = AsyncMock(return_value=[])
+            mock_service.get_goals = AsyncMock(return_value=None)
+            mock_get.return_value = mock_service
+
+            await execute_tool(
+                "get_workout_trends", {"weeks": 52}, user_id
+            )
+
+            call_args = mock_service.get_workout_trends.call_args
+            start_date = call_args[0][1]
+            end_date = call_args[0][2]
+            weeks_diff = (end_date - start_date).days / 7
+            assert weeks_diff == 12
+
+
+class TestRecoveryTrendsExecution:
+    @pytest.mark.asyncio
+    async def test_whoop_not_connected(self, user_id):
+        with patch(
+            "app.services.whoop_service.get_whoop_service"
+        ) as mock_whoop:
+            mock_service = MagicMock()
+            mock_service.get_connection = AsyncMock(return_value=None)
+            mock_whoop.return_value = mock_service
+
+            result = await execute_tool("get_recovery_trends", {}, user_id)
+
+            assert "error" in result
+            assert "not connected" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_returns_recovery_and_sleep_data(self, user_id):
+        mock_recovery = [
+            {"date": "2026-02-13", "recovery_score": 70.0, "hrv_rmssd_milli": 40.0, "resting_heart_rate": 55.0, "spo2_percentage": 97.0},
+            {"date": "2026-02-14", "recovery_score": 75.0, "hrv_rmssd_milli": 42.0, "resting_heart_rate": 54.0, "spo2_percentage": 98.0},
+            {"date": "2026-02-15", "recovery_score": 80.0, "hrv_rmssd_milli": 45.0, "resting_heart_rate": 53.0, "spo2_percentage": 97.0},
+            {"date": "2026-02-16", "recovery_score": 85.0, "hrv_rmssd_milli": 48.0, "resting_heart_rate": 52.0, "spo2_percentage": 98.0},
+        ]
+        mock_sleep = [
+            {"date": "2026-02-13", "sleep_score": 75.0, "sleep_efficiency": 90.0, "total_sleep_hours": 7.0, "rem_hours": 1.5, "deep_sleep_hours": 1.0, "light_sleep_hours": 4.5, "respiratory_rate": 15.0},
+            {"date": "2026-02-14", "sleep_score": 80.0, "sleep_efficiency": 92.0, "total_sleep_hours": 7.5, "rem_hours": 1.8, "deep_sleep_hours": 1.2, "light_sleep_hours": 4.5, "respiratory_rate": 14.5},
+            {"date": "2026-02-15", "sleep_score": 82.0, "sleep_efficiency": 91.0, "total_sleep_hours": 7.2, "rem_hours": 1.6, "deep_sleep_hours": 1.1, "light_sleep_hours": 4.5, "respiratory_rate": 15.0},
+            {"date": "2026-02-16", "sleep_score": 85.0, "sleep_efficiency": 93.0, "total_sleep_hours": 8.0, "rem_hours": 2.0, "deep_sleep_hours": 1.3, "light_sleep_hours": 4.7, "respiratory_rate": 14.0},
+        ]
+
+        with patch(
+            "app.services.whoop_service.get_whoop_service"
+        ) as mock_whoop, patch(
+            "app.services.whoop_sync_service.get_whoop_sync_service"
+        ) as mock_sync:
+            mock_whoop_svc = MagicMock()
+            mock_whoop_svc.get_connection = AsyncMock(return_value={"id": "conn-1"})
+            mock_whoop.return_value = mock_whoop_svc
+
+            mock_sync_svc = MagicMock()
+            mock_sync_svc.get_recovery_trend_data = AsyncMock(return_value=mock_recovery)
+            mock_sync_svc.get_sleep_trend_data = AsyncMock(return_value=mock_sleep)
+            mock_sync.return_value = mock_sync_svc
+
+            result = await execute_tool("get_recovery_trends", {"days": 7}, user_id)
+
+            assert result["days_with_recovery_data"] == 4
+            assert result["days_with_sleep_data"] == 4
+            assert "recovery_score" in result["recovery_averages"]
+            assert "total_sleep_hours" in result["sleep_averages"]
+            assert "recovery_score" in result["trend"]
+            assert "sleep_hours" in result["trend"]
+
+    @pytest.mark.asyncio
+    async def test_caps_days_at_30(self, user_id):
+        with patch(
+            "app.services.whoop_service.get_whoop_service"
+        ) as mock_whoop, patch(
+            "app.services.whoop_sync_service.get_whoop_sync_service"
+        ) as mock_sync:
+            mock_whoop_svc = MagicMock()
+            mock_whoop_svc.get_connection = AsyncMock(return_value={"id": "conn-1"})
+            mock_whoop.return_value = mock_whoop_svc
+
+            mock_sync_svc = MagicMock()
+            mock_sync_svc.get_recovery_trend_data = AsyncMock(return_value=[])
+            mock_sync_svc.get_sleep_trend_data = AsyncMock(return_value=[])
+            mock_sync.return_value = mock_sync_svc
+
+            await execute_tool("get_recovery_trends", {"days": 100}, user_id)
+
+            # Verify it capped at 30
+            call_args = mock_sync_svc.get_recovery_trend_data.call_args
+            assert call_args[0][1] == 30
